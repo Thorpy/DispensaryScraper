@@ -17,7 +17,7 @@ A Python script for scraping product data from dispensary websites and updating 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/dispensary-scraper.git
+git clone https://github.com/Thorpy/DispensaryScraper.git
 cd dispensary-scraper
 ```
 

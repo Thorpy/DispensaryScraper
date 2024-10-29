@@ -5,12 +5,20 @@ from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from datetime import datetime
 
 # Google Sheets setup
-SPREADSHEET_ID = '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'
-SHEET_NAME = 'Mamedica List'  # Desired sheet name
-CSV_FILE_NAME = 'products.csv'
 CREDENTIALS_FILE_NAME = os.path.join(os.path.dirname(__file__), 'credentials.json')
+
+# Define your dispensaries
+dispensaries = {
+    "Mamedica": {
+        "url": "https://mamedica.co.uk/repeat-prescription/",
+        "spreadsheet_id": "1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw",
+        "sheet_name": "Mamedica List"
+    },
+    # Add more dispensaries here
+}
 
 def load_credentials():
     """Load the Google Sheets API credentials."""
@@ -21,9 +29,8 @@ def load_credentials():
         )
     return None
 
-def scrape_mamedica():
-    """Fetch the HTML content and extract product data from Mamedica."""
-    url = "https://mamedica.co.uk/repeat-prescription/"
+def scrape_dispensary(url):
+    """Fetch the HTML content and extract product data from a dispensary."""
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -39,21 +46,20 @@ def scrape_mamedica():
                 except ValueError:
                     continue
 
-    # Sort the products alphabetically by product name (A-Z)
     return sorted(unique_products, key=lambda x: x[0])  # Sort by product name
 
-def save_to_csv(data, filename=CSV_FILE_NAME):
+def save_to_csv(data, filename):
     """Save data to CSV with the correct format."""
     df = pd.DataFrame(data, columns=['Product', 'Price'])
     df['Price'] = df['Price'].apply(lambda x: f'£{x:.2f}')  # Format price as currency
     df.to_csv(filename, index=False)
-    print("CSV file has been created with unique products sorted by name.")
+    print(f"CSV file '{filename}' has been created with unique products sorted by name.")
 
 def read_csv(file_name):
-    """Read the CSV file and return unique products sorted by price."""
+    """Read the CSV file and return unique products sorted by product name."""
     try:
         df = pd.read_csv(file_name)
-        unique_products = df.drop_duplicates(subset='Product').sort_values(by='Product')  # Ensure sorting here
+        unique_products = df.drop_duplicates(subset='Product').sort_values(by='Product')
         return unique_products[['Product', 'Price']].values.tolist()
     except KeyError as e:
         print(f"Error: Missing expected column in CSV file - {e}")
@@ -73,7 +79,7 @@ def get_sheet_id(service, spreadsheet_id, sheet_name):
     return None
 
 def update_google_sheet(service, spreadsheet_id, sheet_id, data):
-    """Update the Google Sheet with the new data."""
+    """Update the Google Sheet with the new data and a static timestamp."""
     try:
         requests = [{
             "updateCells": {
@@ -89,14 +95,35 @@ def update_google_sheet(service, spreadsheet_id, sheet_id, data):
             }
         }]
 
+        # Create a timestamp string
+        timestamp = datetime.now().strftime("Updated on: %H:%M %d/%m/%Y")
+
+        # Append the timestamp string two rows below the data
+        requests.append({
+            "updateCells": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": len(data) + 2,  # Two rows below the data
+                    "endRowIndex": len(data) + 3,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": 1,
+                },
+                "rows": [{
+                    "values": [{"userEnteredValue": {"stringValue": timestamp}}]
+                }],
+                "fields": "userEnteredValue",
+            }
+        })
+
+        # Update the sheet with both data and timestamp
         batch_update_request = {"requests": requests}
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=batch_update_request).execute()
-        print(f"Successfully updated the sheet with {len(data)} rows.")
+        print(f"Successfully updated the sheet with {len(data)} rows and added the timestamp: {timestamp}")
     except HttpError as error:
         print(f"Error updating sheet: {error}")
 
 def main():
-    """Main function to run the script."""
+    """Main function to run the script for all dispensaries."""
     creds = load_credentials()
     if not creds:
         print("No valid credentials found.")
@@ -104,18 +131,19 @@ def main():
 
     service = build('sheets', 'v4', credentials=creds)
 
-    # Scrape data and save to CSV
-    data = scrape_mamedica()
-    save_to_csv(data)
+    for dispensary, details in dispensaries.items():
+        print(f"Processing {dispensary}...")
+        data = scrape_dispensary(details["url"])
+        csv_file_name = f"{dispensary.lower().replace(' ', '_')}_products.csv"
+        save_to_csv(data, csv_file_name)
 
-    # Read the CSV file and prepare data for updating
-    data = read_csv(CSV_FILE_NAME)
-    if data:
-        # Retrieve the sheet ID for the new sheet name
-        sheet_id = get_sheet_id(service, SPREADSHEET_ID, SHEET_NAME)
-        update_google_sheet(service, SPREADSHEET_ID, sheet_id, data)
-    else:
-        print("No data to update in Google Sheets.")
+        # Read the CSV file and prepare data for updating
+        data = read_csv(csv_file_name)
+        if data:
+            sheet_id = get_sheet_id(service, details["spreadsheet_id"], details["sheet_name"])
+            update_google_sheet(service, details["spreadsheet_id"], sheet_id, data)
+        else:
+            print(f"No data to update for {dispensary}.")
 
 if __name__ == '__main__':
     main()

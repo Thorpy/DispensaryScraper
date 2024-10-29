@@ -1,4 +1,3 @@
-import csv
 import os
 import requests
 import pandas as pd
@@ -8,22 +7,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # Google Sheets setup
+SPREADSHEET_ID = '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'
+SHEET_NAME = 'Mamedica List'  # Desired sheet name
+CSV_FILE_NAME = 'products.csv'
 CREDENTIALS_FILE_NAME = os.path.join(os.path.dirname(__file__), 'credentials.json')
-DISPENSARIES = [
-    {
-        'name': 'Mamedica',
-        'url': 'https://mamedica.co.uk/repeat-prescription/',
-        'spreadsheet_id': '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw',
-        'sheet_name': 'Mamedica List'
-    },
-    # Add more dispensaries here
-    # {
-    #     'name': 'Another Dispensary',
-    #     'url': 'https://example.com',
-    #     'spreadsheet_id': 'your_spreadsheet_id',
-    #     'sheet_name': 'Your Sheet Name'
-    # }
-]
 
 def load_credentials():
     """Load the Google Sheets API credentials."""
@@ -36,7 +23,7 @@ def load_credentials():
 
 def scrape_mamedica():
     """Fetch the HTML content and extract product data from Mamedica."""
-    url = DISPENSARIES[0]['url']
+    url = "https://mamedica.co.uk/repeat-prescription/"
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -51,17 +38,14 @@ def scrape_mamedica():
                     unique_products.add((product_name.strip(), float(price.strip())))
                 except ValueError:
                     continue
-    return sorted(unique_products, key=lambda x: x[0])  # Sort A-Z by product name
+    return sorted(unique_products, key=lambda x: x[1])
 
-def save_to_csv(data, filename='products.csv'):
+def save_to_csv(data, filename=CSV_FILE_NAME):
     """Save data to CSV with the correct format."""
-    with open(filename, mode='w', newline='', encoding='utf-8') as csv_file:
-        fieldnames = ['Product', 'Price']
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        writer.writeheader()
-        for product, price in data:
-            writer.writerow({'Product': product, 'Price': f'£{price:.2f}'})
-    print("CSV file has been created with unique products sorted by name.")
+    df = pd.DataFrame(data, columns=['Product', 'Price'])
+    df['Price'] = df['Price'].apply(lambda x: f'£{x:.2f}')
+    df.to_csv(filename, index=False)
+    print("CSV file has been created with unique products sorted by price.")
 
 def read_csv(file_name):
     """Read the CSV file and return unique products sorted by price."""
@@ -123,11 +107,11 @@ def main():
     save_to_csv(data)
 
     # Read the CSV file and prepare data for updating
-    data = read_csv('products.csv')
+    data = read_csv(CSV_FILE_NAME)
     if data:
-        # Retrieve the sheet ID for the Mamedica sheet
-        sheet_id = get_sheet_id(service, DISPENSARIES[0]['spreadsheet_id'], DISPENSARIES[0]['sheet_name'])
-        update_google_sheet(service, DISPENSARIES[0]['spreadsheet_id'], sheet_id, data)
+        # Retrieve the sheet ID for the new sheet name
+        sheet_id = get_sheet_id(service, SPREADSHEET_ID, SHEET_NAME)
+        update_google_sheet(service, SPREADSHEET_ID, sheet_id, data)
     else:
         print("No data to update in Google Sheets.")
 

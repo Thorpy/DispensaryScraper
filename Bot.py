@@ -27,7 +27,7 @@ def scrape_mamedica():
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    unique_products = set()
+    unique_products = []
     for option in soup.find_all('option'):
         value = option.get('value')
         if value and '|' in value:
@@ -35,23 +35,25 @@ def scrape_mamedica():
             if len(parts) == 2:
                 product_name, price = parts
                 try:
-                    unique_products.add((product_name.strip(), float(price.strip())))
+                    unique_products.append((product_name.strip(), float(price.strip())))
                 except ValueError:
                     continue
-    return sorted(unique_products, key=lambda x: x[1])
+
+    # Sort the products alphabetically by product name (A-Z)
+    return sorted(unique_products, key=lambda x: x[0])  # Sort by product name
 
 def save_to_csv(data, filename=CSV_FILE_NAME):
     """Save data to CSV with the correct format."""
     df = pd.DataFrame(data, columns=['Product', 'Price'])
-    df['Price'] = df['Price'].apply(lambda x: f'£{x:.2f}')
+    df['Price'] = df['Price'].apply(lambda x: f'£{x:.2f}')  # Format price as currency
     df.to_csv(filename, index=False)
-    print("CSV file has been created with unique products sorted by price.")
+    print("CSV file has been created with unique products sorted by name.")
 
 def read_csv(file_name):
     """Read the CSV file and return unique products sorted by price."""
     try:
         df = pd.read_csv(file_name)
-        unique_products = df.drop_duplicates(subset='Product').sort_values(by='Price')
+        unique_products = df.drop_duplicates(subset='Product').sort_values(by='Product')  # Ensure sorting here
         return unique_products[['Product', 'Price']].values.tolist()
     except KeyError as e:
         print(f"Error: Missing expected column in CSV file - {e}")

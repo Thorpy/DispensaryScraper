@@ -55,9 +55,9 @@ To allow the script to interact with Google Sheets, you'll need to create a Goog
    - A JSON file will be downloaded. This is your credentials file.
 
 6. **Share Your Google Sheet**:
-   - Create a new Google Sheet.
+   - Create a new Google Sheet for each dispensary you wish to scrape.
    - Click on the "Share" button in the top right corner.
-   - Share the sheet with the service account email (found in the JSON file) by adding it as a collaborator.
+   - Share each sheet with the service account email (found in the JSON file) by adding it as a collaborator.
 
 ### 4. Update the Credentials
 
@@ -65,7 +65,7 @@ Place the downloaded JSON credentials file in the same directory as your script 
 
 ### 5. Configure the Script
 
-- Open the script and update the `DISPENSARIES` list with the URLs and corresponding Google Sheets IDs for any dispensaries you wish to scrape. (will require knowledge of beautiful soup and python if you want to add more)
+- Open the script and update the `DISPENSARIES` list with the URLs and corresponding Google Sheets IDs for any dispensaries you wish to scrape. This allows for easy expansion to add more dispensaries in the future.
 
 ### 6. Run the Script
 

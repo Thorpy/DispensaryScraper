@@ -79,9 +79,24 @@ def get_sheet_id(service, spreadsheet_id, sheet_name):
     return None
 
 def update_google_sheet(service, spreadsheet_id, sheet_id, data):
-    """Update the Google Sheet with the new data and a static timestamp."""
+    """Update the Google Sheet with new data and a static timestamp, clearing any old data first."""
     try:
-        requests = [{
+        # Clear existing product data
+        clear_data_request = {
+            "updateCells": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": 1000,  # Arbitrary large number to clear all rows that may contain data
+                    "startColumnIndex": 0,
+                    "endColumnIndex": 2,
+                },
+                "fields": "userEnteredValue",
+            }
+        }
+
+        # Prepare data update request
+        data_requests = [{
             "updateCells": {
                 "range": {
                     "sheetId": sheet_id,
@@ -95,15 +110,15 @@ def update_google_sheet(service, spreadsheet_id, sheet_id, data):
             }
         }]
 
-        # Create a timestamp string
+        # Create a new timestamp
         timestamp = datetime.now().strftime("Updated on: %H:%M %d/%m/%Y")
 
-        # Append the timestamp string two rows below the data
-        requests.append({
+        # Timestamp request two rows below the data
+        timestamp_request = {
             "updateCells": {
                 "range": {
                     "sheetId": sheet_id,
-                    "startRowIndex": len(data) + 2,  # Two rows below the data
+                    "startRowIndex": len(data) + 2,
                     "endRowIndex": len(data) + 3,
                     "startColumnIndex": 0,
                     "endColumnIndex": 1,
@@ -113,12 +128,13 @@ def update_google_sheet(service, spreadsheet_id, sheet_id, data):
                 }],
                 "fields": "userEnteredValue",
             }
-        })
+        }
 
-        # Update the sheet with both data and timestamp
-        batch_update_request = {"requests": requests}
+        # Execute batch update with clear and data requests
+        batch_update_request = {"requests": [clear_data_request] + data_requests + [timestamp_request]}
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=batch_update_request).execute()
         print(f"Successfully updated the sheet with {len(data)} rows and added the timestamp: {timestamp}")
+
     except HttpError as error:
         print(f"Error updating sheet: {error}")
 

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import requests
 import pandas as pd
@@ -51,7 +52,7 @@ def scrape_dispensary(url):
 def save_to_csv(data, filename):
     """Save data to CSV with the correct format."""
     df = pd.DataFrame(data, columns=['Product', 'Price'])
-    df['Price'] = df['Price'].apply(lambda x: f'£{x:.2f}')  # Format price as currency
+    df['Price'] = df['Price'].apply(lambda x: f'\u00A3{x:.2f}')  # Format price as currency
     df.to_csv(filename, index=False)
     print(f"CSV file '{filename}' has been created with unique products sorted by name.")
 

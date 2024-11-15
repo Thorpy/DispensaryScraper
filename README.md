@@ -3,7 +3,8 @@
 A Python script for scraping product data from dispensary websites and updating Google Sheets with the latest information.
 
 IF YOU JUST WANT TO SEE THE SHEETS:
-**[Mamedica:](https://docs.google.com/spreadsheets/d/1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw/edit?usp=sharing)**
+
+**[Mamedica](https://docs.google.com/spreadsheets/d/1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw/edit?usp=sharing)**
 **[Montu](https://docs.google.com/spreadsheets/d/1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU/edit?usp=sharing)**
 
 ## Requirements

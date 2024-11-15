@@ -51,12 +51,22 @@ def scrape_mamedica(url):
     return sorted(unique_products, key=lambda x: x[0])  # Sort by product name
 
 def scrape_montu(url):
-    """Fetch the JSON content and extract product data from Montu."""
-    response = requests.get(url)
-    products = response.json().get('products', [])
+    """Fetch the JSON content from multiple pages and extract product data from Montu."""
+    page = 1
+    all_products = []
+
+    while True:
+        response = requests.get(f"{url}?page={page}")
+        products = response.json().get('products', [])
+
+        if not products:
+            break  # Stop if there are no more products
+
+        all_products.extend(products)
+        page += 1
 
     unique_products = []
-    for product in products:
+    for product in all_products:
         title = product.get('title')
         price = product.get('variants', [{}])[0].get('price')
         tags = product.get('tags', [])
@@ -91,6 +101,7 @@ def scrape_montu(url):
     # Concatenate the lists: available products first, then unavailable products
     return available_products + unavailable_products
 
+
 def save_to_csv(data, filename, columns):
     """Save data to CSV with the correct format."""
     df = pd.DataFrame(data, columns=columns)
@@ -124,7 +135,7 @@ def get_sheet_id(service, spreadsheet_id, sheet_name):
     return None
 
 def update_google_sheet(service, spreadsheet_id, sheet_id, data, columns):
-    """Update the Google Sheet with new data and a static timestamp, clearing any old data first."""
+    """Update the Google Sheet with new data and apply conditional formatting for availability."""
     try:
         # Clear existing product data
         clear_data_request = {
@@ -197,13 +208,42 @@ def update_google_sheet(service, spreadsheet_id, sheet_id, data, columns):
             }
         }
 
-        # Execute batch update with header, clear, and data requests
-        batch_update_request = {"requests": header_requests + [clear_data_request] + data_requests + [timestamp_request]}
+        # Conditional formatting for unavailable products only if 'Availability' column exists
+        requests = header_requests + [clear_data_request] + data_requests + [timestamp_request]
+        if 'Availability' in columns:
+            conditional_formatting_request = {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": sheet_id,
+                            "startRowIndex": 1,
+                            "endRowIndex": len(data) + 1,
+                            "startColumnIndex": columns.index("Availability"),
+                            "endColumnIndex": columns.index("Availability") + 1,
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "Not Available"}],
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 1, "green": 0.8, "blue": 0.8}
+                            },
+                        },
+                    },
+                    "index": 0
+                }
+            }
+            requests.append(conditional_formatting_request)
+
+        # Execute batch update with header, clear, data requests, and conditional formatting
+        batch_update_request = {"requests": requests}
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=batch_update_request).execute()
         print(f"Successfully updated the sheet with {len(data)} rows and added the timestamp: {timestamp}")
 
     except HttpError as error:
         print(f"Error updating sheet: {error}")
+
 
 def main():
     """Main function to run the script for all dispensaries."""
@@ -237,6 +277,7 @@ def main():
             update_google_sheet(service, details["spreadsheet_id"], sheet_id, data, columns)
         else:
             print(f"No data to update for {dispensary}.")
+
 
 if __name__ == '__main__':
     main()

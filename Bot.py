@@ -151,7 +151,7 @@ def main():
             spreadsheet_id="1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU",
             sheet_name="Montu List",
             scrape_method=scrape_montu,
-            columns=['Product', 'Price', 'THC Content', 'CBD Content', 'Availability']
+            columns=['Product', 'Price', 'THC %', 'CBD %', 'Availability']
         ),
         # Add more dispensaries here...
     ]

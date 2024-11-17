@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import requests
 import pandas as pd
@@ -122,7 +123,7 @@ def apply_formatting(worksheet, columns):
     worksheet.freeze(rows=1)
     for i, column in enumerate(columns, start=1):
         if column == 'Price':
-            worksheet.format(f'{chr(64 + i)}2:{chr(64 + i)}', {'numberFormat': {'type': 'CURRENCY', 'pattern': '£#,##0.00'}})
+            worksheet.format(f'{chr(64 + i)}2:{chr(64 + i)}', {'numberFormat': {'type': 'CURRENCY', 'pattern': '\u00A3#,##0.00'}})
 
 def process_dispensary(dispensary):
     """Process a single dispensary."""
@@ -151,7 +152,7 @@ def main():
             spreadsheet_id="1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU",
             sheet_name="Montu List",
             scrape_method=scrape_montu,
-            columns=['Product', 'Price', 'THC %', 'CBD %', 'Availability']
+            columns=['Product', 'Price', 'THC Content', 'CBD Content', 'Availability']
         ),
         # Add more dispensaries here...
     ]

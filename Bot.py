@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 import requests
 import pandas as pd
@@ -88,7 +87,7 @@ def scrape_montu(url):
     # Filter out any rows that are entirely blank
     unique_products = [row for row in unique_products if any(row)]
 
-    # Sort by product name
+    # Sort by product name and availability
     available_products = sorted([p for p in unique_products if p[4] == 'Available Now'], key=lambda x: x[0])
     unavailable_products = sorted([p for p in unique_products if p[4] == 'Not Available'], key=lambda x: x[0])
 

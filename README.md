@@ -19,6 +19,7 @@ IF YOU JUST WANT TO SEE THE SHEETS:
   - `pandas`
   - `google-auth`
   - `google-api-python-client`
+  - `gspread`
 
 ## Setup Instructions
 
@@ -34,7 +35,7 @@ cd dispensary-scraper
 Make sure you have Python and pip installed, then run:
 
 ```bash
-pip install requests beautifulsoup4 pandas google-auth google-api-python-client
+pip install requests beautifulsoup4 pandas google-auth google-api-python-client gspread
 ```
 
 ### 3. Generate Google Sheets API Credentials
@@ -73,7 +74,7 @@ Place the downloaded JSON credentials file in the same directory as your script 
 
 ### 5. Configure the Script
 
-- Open the script and update the `DISPENSARIES` list with the URLs and corresponding Google Sheets IDs for any dispensaries you wish to scrape. This allows for easy expansion to add more dispensaries in the future.
+- Open the script and update the `dispensaries` list with the URLs and corresponding Google Sheets IDs for any dispensaries you wish to scrape. YOU WILL NEED YOUR OWN SCRAPE LOGIC for custom dispensaries.
 
 ### 6. Run the Script
 
@@ -82,6 +83,10 @@ Execute the script using the following command:
 ```bash
 python your_script_name.py
 ```
+
+### 7. Terminal Output
+
+You will receive updates in the terminal about the process steps, including when each dispensary is being processed and when each sheet is successfully updated.
 
 ## License
 

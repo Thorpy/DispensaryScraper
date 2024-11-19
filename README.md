@@ -8,7 +8,7 @@ IF YOU JUST WANT TO SEE THE SHEETS:
   
   **[Montu](https://docs.google.com/spreadsheets/d/1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU/edit?usp=sharing)**
   
-  **[CB1](http://cb1.shop/)** - note this is their own google sheet, I didn't make it, it's only included for curious people that might need a link to their store (plus it's much prettier than anything I make!)
+  **[CB1](http://cb1.shop/)** - note this is their own Google sheet, I didn't make it, it's only included for curious people that might need a link to their store (plus it's much prettier than anything I make!)
 
 ## Requirements
 
@@ -16,9 +16,7 @@ IF YOU JUST WANT TO SEE THE SHEETS:
 - Required Python packages:
   - `requests`
   - `beautifulsoup4`
-  - `pandas`
   - `google-auth`
-  - `google-api-python-client`
   - `gspread`
 
 ## Setup Instructions
@@ -35,7 +33,7 @@ cd dispensary-scraper
 Make sure you have Python and pip installed, then run:
 
 ```bash
-pip install requests beautifulsoup4 pandas google-auth google-api-python-client gspread
+pip install requests beautifulsoup4 google-auth gspread
 ```
 
 ### 3. Generate Google Sheets API Credentials

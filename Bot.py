@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 import re
 
 # Constants
-CREDENTIALS_FILE_NAME = 'credentials.json'
+CREDENTIALS_FILE_NAME = os.path.join(os.path.dirname(__file__), 'credentials.json')
 
 class Dispensary:
     def __init__(self, name, url, spreadsheet_id, sheet_name, scrape_method, columns):

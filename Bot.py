@@ -126,22 +126,22 @@ def prepare_updates(columns, data):
     
     return updates, formatting_requests
 
-def update_google_sheet_with_gspread(creds, spreadsheet_id, sheet_name, data, columns):
+def update_google_sheet_with_gspread(spreadsheet_id, sheet_name, data, columns):
     """Update the specified Google Sheet with data and a timestamp."""
+    creds = load_credentials()
     gc = gspread.authorize(creds)
     worksheet = gc.open_by_key(spreadsheet_id).worksheet(sheet_name)
     worksheet.clear()
 
     updates, _ = prepare_updates(columns, data)
-    worksheet.update(range_name='A1', values=updates)
+    worksheet.update(values=updates, range_name='A1')
     print(f"Sheet '{sheet_name}' updated successfully.")
 
-def process_dispensary(creds, dispensary):
+def process_dispensary(dispensary):
     """Process a single dispensary."""
     print(f"Processing dispensary: {dispensary.name}")
     data = dispensary.scrape_data()
     update_google_sheet_with_gspread(
-        creds=creds,
         spreadsheet_id=dispensary.spreadsheet_id,
         sheet_name=dispensary.sheet_name,
         data=data,
@@ -175,7 +175,7 @@ def main():
     ]
 
     for dispensary in dispensaries:
-        process_dispensary(creds, dispensary)
+        process_dispensary(dispensary)
 
 if __name__ == "__main__":
     main()

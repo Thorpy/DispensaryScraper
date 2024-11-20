@@ -66,23 +66,27 @@ def prepare_updates(columns, data):
     
     row_colors = [(1.0, 1.0, 1.0) if row % 2 == 0 else (0.95, 0.95, 0.95) for row in range(1, len(data) + 3)]
     
+    # Formatting for header and timestamp only
     formatting_requests = [
+        # Bold formatting for header row
         {
             'repeatCell': {
                 'range': {
                     'startRowIndex': 0,
-                    'endRowIndex': 1,
+                    'endRowIndex': 1,  # Header row only
                     'startColumnIndex': 0,
                     'endColumnIndex': len(columns),
                 },
                 'cell': {
                     'userEnteredFormat': {
-                        'textFormat': {'bold': True}
+                        'textFormat': {'bold': True},
+                        'horizontalAlignment': 'CENTER'  # Center align the header
                     }
                 },
-                'fields': 'userEnteredFormat.textFormat.bold'
+                'fields': 'userEnteredFormat(textFormat,horizontalAlignment)'
             }
         },
+        # Background colors for data rows
         *[
             {
                 'repeatCell': {
@@ -104,12 +108,13 @@ def prepare_updates(columns, data):
                     'fields': 'userEnteredFormat.backgroundColor'
                 }
             }
-            for row_idx in range(1, len(data) + 3)
+            for row_idx in range(1, len(data) + 1)  # Only format data rows
         ],
+        # Bold formatting for timestamp row
         {
             'repeatCell': {
                 'range': {
-                    'startRowIndex': len(data) + 2,
+                    'startRowIndex': len(data) + 2,  # Timestamp row
                     'endRowIndex': len(data) + 3,
                     'startColumnIndex': 0,
                     'endColumnIndex': len(columns),
@@ -126,22 +131,22 @@ def prepare_updates(columns, data):
     
     return updates, formatting_requests
 
-def update_google_sheet_with_gspread(spreadsheet_id, sheet_name, data, columns):
+def update_google_sheet_with_gspread(creds, spreadsheet_id, sheet_name, data, columns):
     """Update the specified Google Sheet with data and a timestamp."""
-    creds = load_credentials()
     gc = gspread.authorize(creds)
     worksheet = gc.open_by_key(spreadsheet_id).worksheet(sheet_name)
     worksheet.clear()
 
     updates, _ = prepare_updates(columns, data)
-    worksheet.update(values=updates, range_name='A1')
+    worksheet.update(range_name='A1', values=updates)
     print(f"Sheet '{sheet_name}' updated successfully.")
 
-def process_dispensary(dispensary):
+def process_dispensary(creds, dispensary):
     """Process a single dispensary."""
     print(f"Processing dispensary: {dispensary.name}")
     data = dispensary.scrape_data()
     update_google_sheet_with_gspread(
+        creds=creds,
         spreadsheet_id=dispensary.spreadsheet_id,
         sheet_name=dispensary.sheet_name,
         data=data,
@@ -175,7 +180,7 @@ def main():
     ]
 
     for dispensary in dispensaries:
-        process_dispensary(dispensary)
+        process_dispensary(creds, dispensary)
 
 if __name__ == "__main__":
     main()

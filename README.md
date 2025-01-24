@@ -11,7 +11,6 @@ Automated product data scraper for medical dispensaries with real-time Google Sh
 🔗 [Montu Products](https://docs.google.com/spreadsheets/d/1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU/edit?usp=sharing)  
 🔗 [CB1 Shop](http://cb1.shop/) (3rd party sheet)
 
-![Screenshot](https://via.placeholder.com/800x500.png?text=Spreadsheet+Preview)
 
 ## Features ✨
 - Real-time Google Sheets updates

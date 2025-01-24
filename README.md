@@ -1,91 +1,58 @@
-# Dispensary Scraper
+# Dispensary Scraper 🍁
 
-A Python script for scraping product data from dispensary websites and updating Google Sheets with the latest information.
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/Thorpy/DispensaryScraper)](https://github.com/Thorpy/DispensaryScraper/commits/main)
 
-IF YOU JUST WANT TO SEE THE SHEETS:
+Automated product data scraper for medical dispensaries with real-time Google Sheets integration.
 
-  **[Mamedica](https://docs.google.com/spreadsheets/d/1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw/edit?usp=sharing)**
-  
-  **[Montu](https://docs.google.com/spreadsheets/d/1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU/edit?usp=sharing)**
-  
-  **[CB1](http://cb1.shop/)** - note this is their own Google sheet, I didn't make it, it's only included for curious people that might need a link to their store (plus it's much prettier than anything I make!)
+**Live Sheets** (view-only):  
+🔗 [Mamedica Products](https://docs.google.com/spreadsheets/d/1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw/edit?usp=sharing)  
+🔗 [Montu Products](https://docs.google.com/spreadsheets/d/1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU/edit?usp=sharing)  
+🔗 [CB1 Shop](http://cb1.shop/) (3rd party sheet)
 
-## Requirements
+![Screenshot](https://via.placeholder.com/800x500.png?text=Spreadsheet+Preview)
 
-- Python 3.x
-- Required Python packages:
-  - `requests`
-  - `beautifulsoup4`
-  - `google-auth`
-  - `gspread`
+## Features ✨
+- Real-time Google Sheets updates
+- Mobile-optimized formatting
+- Automatic price/availability tracking
+- Error handling with retries
 
-## Setup Instructions
-
-### 1. Clone the Repository
-
+## Installation ⚙️
 ```bash
 git clone https://github.com/Thorpy/DispensaryScraper.git
-cd dispensary-scraper
+cd DispensaryScraper
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 2. Install Dependencies
-
-Make sure you have Python and pip installed, then run:
-
+## Configuration 🔧
+1. Create Google Service Account credentials
+2. Share your sheet with the service account email
+3. Add credentials to `.env`:
 ```bash
-pip install requests beautifulsoup4 google-auth gspread
+GOOGLE_CREDENTIALS_PATH="./credentials.json"
+MAMEDICA_SHEET_ID="your_sheet_id"
+MONTU_SHEET_ID="your_sheet_id"
 ```
 
-### 3. Generate Google Sheets API Credentials
-
-To allow the script to interact with Google Sheets, you'll need to create a Google Cloud project and generate a service account key:
-
-1. **Go to the [Google Cloud Console](https://console.cloud.google.com/)**.
-2. **Create a new project**:
-   - Click on the project dropdown on the top left and select "New Project".
-   - Name your project and click "Create".
-
-3. **Enable the Google Sheets API**:
-   - In the left sidebar, navigate to `APIs & Services` > `Library`.
-   - Search for "Google Sheets API" and click on it.
-   - Click the "Enable" button.
-
-4. **Create a Service Account**:
-   - In the left sidebar, navigate to `APIs & Services` > `Credentials`.
-   - Click on "Create Credentials" and select "Service Account".
-   - Fill in the service account details and click "Create".
-   - (Optional) Grant this service account access to project resources, then click "Continue".
-
-5. **Generate the Service Account Key**:
-   - In the Service Accounts list, click on the service account you just created.
-   - Go to the "Keys" tab and click on "Add Key" > "JSON".
-   - A JSON file will be downloaded. This is your credentials file.
-
-6. **Share Your Google Sheet**:
-   - Create a new Google Sheet for each dispensary you wish to scrape.
-   - Click on the "Share" button in the top right corner.
-   - Share each sheet with the service account email (found in the JSON file) by adding it as a collaborator.
-
-### 4. Update the Credentials
-
-Place the downloaded JSON credentials file in the same directory as your script and rename it to `credentials.json`.
-
-### 5. Configure the Script
-
-- Open the script and update the `dispensaries` list with the URLs and corresponding Google Sheets IDs for any dispensaries you wish to scrape. YOU WILL NEED YOUR OWN SCRAPE LOGIC for custom dispensaries.
-
-### 6. Run the Script
-
-Execute the script using the following command:
-
+## Usage 🚀
 ```bash
-python your_script_name.py
+python dispensary_scraper.py
 ```
 
-### 7. Terminal Output
+Sample output:
+```
+2024-01-24 12:00:00,000 - INFO - Processing Mamedica
+2024-01-24 12:00:05,123 - INFO - Updated 142 products
+2024-01-24 12:00:10,456 - INFO - Processing Montu
+2024-01-24 12:00:15,789 - INFO - Updated 89 products
+```
 
-You will receive updates in the terminal about the process steps, including when each dispensary is being processed and when each sheet is successfully updated.
+## License 📄
+MIT License - see [LICENSE](LICENSE)
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+---
+**Maintained by Thorpy** • [Report Issues](https://github.com/Thorpy/DispensaryScraper/issues)

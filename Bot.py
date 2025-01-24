@@ -1,170 +1,336 @@
 # -*- coding: utf-8 -*-
 import os
 import requests
+import logging
 from datetime import datetime
+from typing import List, Tuple, Optional
 from google.oauth2.service_account import Credentials
 import gspread
 from bs4 import BeautifulSoup
 import re
 
-# Constants
-CREDENTIALS_FILE_NAME = os.path.join(os.path.dirname(__file__), 'credentials.json')
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+CREDENTIALS_PATH = os.getenv(
+    'GOOGLE_CREDENTIALS_PATH',
+    os.path.join(os.path.dirname(__file__), 'credentials.json')
+)
 
 class Dispensary:
-    def __init__(self, name, url, spreadsheet_id, sheet_name, scrape_method, columns):
+    def __init__(self, name: str, url: str, spreadsheet_id: str, sheet_name: str,
+                 scrape_method: callable, columns: List[str],
+                 availability_col: Optional[int] = None):
         self.name = name
         self.url = url
         self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         self.scrape_method = scrape_method
         self.columns = columns
+        self.availability_col = availability_col
 
-    def scrape_data(self):
-        return self.scrape_method(self.url)
+def load_credentials() -> Optional[Credentials]:
+    """Load Google Sheets API credentials with error handling."""
+    try:
+        return Credentials.from_service_account_file(
+            CREDENTIALS_PATH,
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+    except Exception as e:
+        logging.error(f"Credential loading failed: {e}")
+        return None
 
-def load_credentials():
-    """Load the Google Sheets API credentials."""
-    return Credentials.from_service_account_file(CREDENTIALS_FILE_NAME, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+def scrape_mamedica(url: str) -> List[Tuple[str, float]]:
+    """Scrape Mamedica products with error handling."""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-def scrape_mamedica(url):
-    """Fetch the HTML content and extract product data from Mamedica."""
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
+        products = set()
+        for option in soup.find_all('option'):
+            if not (value := option.get('value')) or '|' not in value:
+                continue
+            try:
+                product_name, price_str = map(str.strip, value.split('|', 1))
+                products.add((product_name, round(float(price_str), 2)))
+            except (ValueError, IndexError) as e:
+                logging.warning(f"Error parsing product: {e}")
 
-    unique_products = sorted({
-        (product_name.strip(), round(float(price.strip()), 2))
-        for option in soup.find_all('option')
-        if (value := option.get('value')) and '|' in value
-        if (product_name := value.split('|')[0]) and (price := value.split('|')[1])
-    }, key=lambda x: x[0])  # Sort by product name
+        return sorted(products, key=lambda x: x[0])
 
-    return unique_products
+    except Exception as e:
+        logging.error(f"Mamedica scrape failed: {e}")
+        return []
 
-def scrape_montu(url):
-    """Fetch the JSON content from Montu and extract product data."""
+def scrape_montu(url: str) -> List[Tuple[str, float, str, str, str]]:
+    """Scrape Montu products with pagination and error handling."""
     all_products = []
     page = 1
+    retries = 3
 
-    while (products := requests.get(f"{url}?page={page}").json().get('products', [])):
-        all_products.extend(products)
-        page += 1
+    while retries > 0:
+        try:
+            response = requests.get(f"{url}?page={page}", timeout=15)
+            response.raise_for_status()
+            products = response.json().get('products', [])
 
-    unique_products = [
-        (product['title'].strip(), round(float(product['variants'][0]['price'].strip()), 2),
-         re.search(r'THC\s*([\d.]+%)', product['body_html'], re.IGNORECASE).group(1) if (thc_match := re.search(r'THC\s*([\d.]+%)', product['body_html'], re.IGNORECASE)) else '',
-         re.search(r'CBD\s*([\d.]+%)', product['body_html'], re.IGNORECASE).group(1) if (cbd_match := re.search(r'CBD\s*([\d.]+%)', product['body_html'], re.IGNORECASE)) else '',
-         'Available Now' if product['variants'][0]['available'] else 'Not Available')
-        for product in all_products if product['title'] and product['variants'][0]['price']
-    ]
+            if not products:
+                break
 
-    return sorted(unique_products, key=lambda x: (x[4] == 'Not Available', x[0]))
+            for product in products:
+                try:
+                    title = product.get('title', '').strip()
+                    variant = product['variants'][0]
+                    price = float(variant['price'].strip())
+                    body_html = product.get('body_html', '')
 
-def prepare_updates(columns, data):
-    """Prepare updates and formatting in memory."""
-    timestamp = [[datetime.now().strftime("Updated on: %H:%M %d/%m/%Y")]]
-    updates = [columns] + data + [[]] + timestamp
-    
-    row_colors = [(1.0, 1.0, 1.0) if row % 2 == 0 else (0.95, 0.95, 0.95) for row in range(1, len(data) + 3)]
-    
-    # Formatting for header and timestamp only
-    formatting_requests = [
-        # Bold formatting for header row
-        {
-            'repeatCell': {
-                'range': {
-                    'startRowIndex': 0,
-                    'endRowIndex': 1,  # Header row only
-                    'startColumnIndex': 0,
-                    'endColumnIndex': len(columns),
-                },
-                'cell': {
-                    'userEnteredFormat': {
-                        'textFormat': {'bold': True},
-                        'horizontalAlignment': 'CENTER'  # Center align the header
+                    thc_match = re.search(r'THC\s*([\d.]+)%', body_html, re.IGNORECASE)
+                    cbd_match = re.search(r'CBD\s*([\d.]+)%', body_html, re.IGNORECASE)
+
+                    thc = float(thc_match.group(1)) if thc_match else None
+                    cbd = float(cbd_match.group(1)) if cbd_match else None
+
+                    all_products.append((
+                        title,
+                        price,
+                        f"{thc:.1f}%" if thc is not None else "Unknown",
+                        f"{cbd:.1f}%" if cbd is not None else "Unknown",
+                        'Available' if variant['available'] else 'Not Available'
+                    ))
+                except (KeyError, IndexError, ValueError) as e:
+                    logging.warning(f"Error parsing product: {e}")
+
+            page += 1
+            retries = 3
+        except (requests.RequestException, ValueError):
+            retries -= 1
+            logging.warning(f"Retrying Montu page {page} ({retries} left)...")
+
+    return sorted(all_products, key=lambda x: (x[4] == 'Not Available', x[0]))
+
+def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
+                          availability_col: Optional[int]) -> List[dict]:
+    """Generate Google Sheets formatting requests with API-compliant rules."""
+    sheet_id = worksheet.id
+    requests = []
+
+    # Base cell formatting
+    requests.append({
+        'repeatCell': {
+            'range': {
+                'sheetId': sheet_id,
+                'startRowIndex': 0,
+                'endRowIndex': len(data) + 3 if data else 3,
+                'startColumnIndex': 0,
+                'endColumnIndex': len(columns)
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'wrapStrategy': 'WRAP',
+                    'verticalAlignment': 'MIDDLE',
+                    'horizontalAlignment': 'CENTER',
+                    'borders': {
+                        'top': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'bottom': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'left': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'right': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}}
                     }
-                },
-                'fields': 'userEnteredFormat(textFormat,horizontalAlignment)'
-            }
-        },
-        # Background colors for data rows
-        *[
-            {
-                'repeatCell': {
-                    'range': {
-                        'startRowIndex': row_idx,
-                        'endRowIndex': row_idx + 1,
-                        'startColumnIndex': 0,
-                        'endColumnIndex': len(columns),
+                }
+            },
+            'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment,borders)'
+        }
+    })
+
+    # Header styling
+    requests.append({
+        'repeatCell': {
+            'range': {
+                'sheetId': sheet_id,
+                'startRowIndex': 0,
+                'endRowIndex': 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': len(columns)
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'textFormat': {
+                        'bold': True,
+                        'fontSize': 12,
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}
                     },
-                    'cell': {
-                        'userEnteredFormat': {
-                            'backgroundColor': {
-                                'red': row_colors[row_idx - 1][0],
-                                'green': row_colors[row_idx - 1][1],
-                                'blue': row_colors[row_idx - 1][2]
-                            }
+                    'horizontalAlignment': 'CENTER',
+                    'backgroundColor': {'red': 0.1, 'green': 0.2, 'blue': 0.3},
+                    'borders': {
+                        'top': {'style': 'SOLID', 'width': 2, 'color': {'red': 0, 'green': 0, 'blue': 0}},
+                        'bottom': {'style': 'SOLID', 'width': 2, 'color': {'red': 0, 'green': 0, 'blue': 0}}
+                    }
+                }
+            },
+            'fields': 'userEnteredFormat(textFormat,horizontalAlignment,backgroundColor,borders)'
+        }
+    })
+
+    # Column widths
+    column_widths = {0: 180, 1: 100, 2: 80, 3: 80, 4: 110}
+    for col, width in column_widths.items():
+        if col < len(columns):
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {'sheetId': sheet_id, 'dimension': 'COLUMNS', 'startIndex': col},
+                    'properties': {'pixelSize': width},
+                    'fields': 'pixelSize'
+                }
+            })
+
+    if data:
+        # Alternating row colors (API-compliant)
+        requests.append({
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [{
+                        'sheetId': sheet_id,
+                        'startRowIndex': 1,
+                        'endRowIndex': len(data) + 1
+                    }],
+                    'booleanRule': {
+                        'condition': {'type': 'CUSTOM_FORMULA', 'values': [{'userEnteredValue': '=ISEVEN(ROW())'}]},
+                        'format': {
+                            'backgroundColor': {'red': 0.98, 'green': 0.98, 'blue': 0.98}
                         }
-                    },
-                    'fields': 'userEnteredFormat.backgroundColor'
+                    }
                 }
             }
-            for row_idx in range(1, len(data) + 1)  # Only format data rows
-        ],
-        # Bold formatting for timestamp row
-        {
+        })
+
+        # Price formatting
+        requests.append({
             'repeatCell': {
-                'range': {
-                    'startRowIndex': len(data) + 2,  # Timestamp row
-                    'endRowIndex': len(data) + 3,
-                    'startColumnIndex': 0,
-                    'endColumnIndex': len(columns),
-                },
+                'range': {'sheetId': sheet_id, 'startRowIndex': 1, 'startColumnIndex': 1},
                 'cell': {
                     'userEnteredFormat': {
-                        'textFormat': {'bold': True}
+                        'numberFormat': {'type': 'CURRENCY', 'pattern': '"£"#,##0.00'},
+                        'horizontalAlignment': 'RIGHT'
                     }
                 },
-                'fields': 'userEnteredFormat.textFormat.bold'
+                'fields': 'userEnteredFormat(numberFormat,horizontalAlignment)'
             }
+        })
+
+        # Availability formatting (API-compliant)
+        if availability_col is not None:
+            availability_range = {
+                'sheetId': sheet_id,
+                'startRowIndex': 1,
+                'startColumnIndex': availability_col
+            }
+            requests.extend([
+                {
+                    'addConditionalFormatRule': {
+                        'rule': {
+                            'ranges': [availability_range],
+                            'booleanRule': {
+                                'condition': {'type': 'TEXT_EQ', 'values': [{'userEnteredValue': 'Not Available'}]},
+                                'format': {
+                                    'backgroundColor': {'red': 1, 'green': 0.9, 'blue': 0.9},
+                                    'textFormat': {'bold': True}
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    'addConditionalFormatRule': {
+                        'rule': {
+                            'ranges': [availability_range],
+                            'booleanRule': {
+                                'condition': {'type': 'TEXT_EQ', 'values': [{'userEnteredValue': 'Available'}]},
+                                'format': {
+                                    'backgroundColor': {'red': 0.85, 'green': 0.95, 'blue': 0.85},
+                                    'textFormat': {'bold': True}
+                                }
+                            }
+                        }
+                    }
+                }
+            ])
+
+    # Timestamp formatting
+    timestamp_row = len(data) + 2 if data else 2
+    requests.append({
+        'repeatCell': {
+            'range': {
+                'sheetId': sheet_id,
+                'startRowIndex': timestamp_row,
+                'endRowIndex': timestamp_row + 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'textFormat': {
+                        'italic': True,
+                        'bold': True,
+                        'fontSize': 10,
+                        'foregroundColor': {'red': 0.5, 'green': 0.5, 'blue': 0.5}
+                    },
+                    'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
+                }
+            },
+            'fields': 'userEnteredFormat(textFormat,backgroundColor)'
         }
-    ]
-    
-    return updates, formatting_requests
+    })
 
-def update_google_sheet_with_gspread(creds, spreadsheet_id, sheet_name, data, columns):
-    """Update the specified Google Sheet with data and a timestamp."""
-    gc = gspread.authorize(creds)
-    worksheet = gc.open_by_key(spreadsheet_id).worksheet(sheet_name)
-    worksheet.clear()
+    # Freeze header row
+    requests.append({
+        'updateSheetProperties': {
+            'properties': {'sheetId': sheet_id, 'gridProperties': {'frozenRowCount': 1}},
+            'fields': 'gridProperties.frozenRowCount'
+        }
+    })
 
-    updates, _ = prepare_updates(columns, data)
-    worksheet.update(range_name='A1', values=updates)
-    print(f"Sheet '{sheet_name}' updated successfully.")
+    return requests
 
-def process_dispensary(creds, dispensary):
-    """Process a single dispensary."""
-    print(f"Processing dispensary: {dispensary.name}")
-    data = dispensary.scrape_data()
-    update_google_sheet_with_gspread(
-        creds=creds,
-        spreadsheet_id=dispensary.spreadsheet_id,
-        sheet_name=dispensary.sheet_name,
-        data=data,
-        columns=dispensary.columns
-    )
-    print(f"Dispensary '{dispensary.name}' processing complete.")
+def update_google_sheet(creds: Credentials, dispensary: Dispensary, data: List[Tuple]):
+    """Update Google Sheet with data and formatting."""
+    try:
+        gc = gspread.authorize(creds)
+        spreadsheet = gc.open_by_key(dispensary.spreadsheet_id)
+        worksheet = spreadsheet.worksheet(dispensary.sheet_name)
+
+        # Prepare data with empty row before timestamp
+        timestamp = datetime.now().strftime("Updated on: %H:%M %d/%m/%Y")
+        updates = [dispensary.columns] + data + [[]] + [[timestamp]]
+
+        worksheet.clear()
+        worksheet.update(updates, 'A1')
+
+        # Apply formatting
+        format_requests = create_format_requests(worksheet, data, dispensary.columns, dispensary.availability_col)
+        if format_requests:
+            spreadsheet.batch_update({'requests': format_requests})
+
+        logging.info(f"Successfully updated {dispensary.name} with {len(data)} products")
+
+    except gspread.exceptions.APIError as e:
+        logging.error(f"Google API Error: {e.response.text}")
+    except Exception as e:
+        logging.error(f"Failed to update {dispensary.name}: {str(e)}")
 
 def main():
     creds = load_credentials()
     if not creds:
-        print("No valid credentials found.")
         return
 
     dispensaries = [
         Dispensary(
             name="Mamedica",
             url="https://mamedica.co.uk/repeat-prescription/",
-            spreadsheet_id="1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw",
+            spreadsheet_id=os.getenv('MAMEDICA_SHEET_ID', '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'),
             sheet_name="Mamedica List",
             scrape_method=scrape_mamedica,
             columns=['Product', 'Price']
@@ -172,15 +338,23 @@ def main():
         Dispensary(
             name="Montu",
             url="https://store.montu.uk/products.json",
-            spreadsheet_id="1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU",
+            spreadsheet_id=os.getenv('MONTU_SHEET_ID', '1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU'),
             sheet_name="Montu List",
             scrape_method=scrape_montu,
-            columns=['Product', 'Price', 'THC %', 'CBD %', 'Availability']
-        ),
+            columns=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
+            availability_col=4
+        )
     ]
 
     for dispensary in dispensaries:
-        process_dispensary(creds, dispensary)
+        try:
+            logging.info(f"Processing {dispensary.name}")
+            if data := dispensary.scrape_method(dispensary.url):
+                update_google_sheet(creds, dispensary, data)
+            else:
+                logging.warning(f"No data found for {dispensary.name}")
+        except Exception as e:
+            logging.error(f"Error processing {dispensary.name}: {e}")
 
 if __name__ == "__main__":
     main()

@@ -2,6 +2,8 @@
 import os
 import requests
 import logging
+import random
+import time
 from datetime import datetime
 from typing import List, Tuple, Optional
 from google.oauth2.service_account import Credentials
@@ -44,29 +46,67 @@ def load_credentials() -> Optional[Credentials]:
         logging.error(f"Credential loading failed: {e}")
         return None
 
-def scrape_mamedica(url: str) -> List[Tuple[str, float]]:
-    """Scrape Mamedica products with error handling."""
+def scrape_mamedica(url: str) -> List[Tuple]:
+    """Scrape Mamedica products with anti-blocking measures."""
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Configure headers to mimic real browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-GB,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.google.com/'
+        }
 
+        # Create session with retry logic
+        session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(max_retries=3)
+        session.mount('https://', adapter)
+
+        # Initial request with random delay
+        time.sleep(random.uniform(1.0, 2.5))
+        response = session.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+
+        # Verify we received the actual prescription page
+        if "repeat-prescription" not in response.text.lower():
+            logging.warning("Mamedica: Received unexpected page content")
+            return []
+
+        soup = BeautifulSoup(response.text, 'html.parser')
         products = set()
+
+        # Parse products with error handling
         for option in soup.find_all('option'):
             if not (value := option.get('value')) or '|' not in value:
                 continue
+            
             try:
-                product_name, price_str = map(str.strip, value.split('|', 1))
-                products.add((product_name, round(float(price_str), 2)))
-            except (ValueError, IndexError) as e:
-                logging.warning(f"Error parsing product: {e}")
+                # Add random processing delay
+                time.sleep(random.uniform(0.1, 0.3))
+                
+                product_name = value.split('|')[0].strip()
+                price_value = value.split('|')[1].strip()
+                
+                # Convert price to float for proper formatting
+                price = round(float(price_value), 2)
+                products.add((product_name, price))
+                
+            except (IndexError, ValueError, TypeError) as e:
+                logging.warning(f"Mamedica: Error parsing product - {str(e)}")
+                continue
 
         return sorted(products, key=lambda x: x[0])
 
-    except Exception as e:
-        logging.error(f"Mamedica scrape failed: {e}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Mamedica: Request failed - {str(e)}")
         return []
-
+    except Exception as e:
+        logging.error(f"Mamedica: Unexpected error - {str(e)}")
+        return []
 def scrape_montu(url: str) -> List[Tuple[str, float, str, str, str]]:
     """Scrape Montu products with pagination and error handling."""
     all_products = []

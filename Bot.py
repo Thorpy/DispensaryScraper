@@ -10,6 +10,7 @@ from google.oauth2.service_account import Credentials
 import gspread
 from bs4 import BeautifulSoup
 import re
+import cloudscraper  # New import for bypassing Cloudflare
 
 # Configure logging
 logging.basicConfig(
@@ -47,28 +48,15 @@ def load_credentials() -> Optional[Credentials]:
         return None
 
 def scrape_mamedica(url: str) -> List[Tuple]:
-    """Scrape Mamedica products with anti-blocking measures."""
+    """Scrape Mamedica products using cloudscraper to bypass Cloudflare."""
     try:
-        # Configure headers to mimic real browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-GB,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.google.com/'
-        }
-
-        # Create session with retry logic
-        session = requests.Session()
-        adapter = requests.adapters.HTTPAdapter(max_retries=3)
-        session.mount('https://', adapter)
-
-        # Initial request with random delay
+        # Create a cloudscraper instance
+        scraper = cloudscraper.create_scraper()
+        
+        # Optionally add a random delay to mimic human browsing
         time.sleep(random.uniform(1.0, 2.5))
-        response = session.get(url, headers=headers, timeout=15)
+        
+        response = scraper.get(url, timeout=15)
         response.raise_for_status()
 
         # Verify we received the actual prescription page
@@ -79,22 +67,15 @@ def scrape_mamedica(url: str) -> List[Tuple]:
         soup = BeautifulSoup(response.text, 'html.parser')
         products = set()
 
-        # Parse products with error handling
+        # Parse products
         for option in soup.find_all('option'):
             if not (value := option.get('value')) or '|' not in value:
                 continue
-            
+
             try:
-                # Add random processing delay
-                time.sleep(random.uniform(0.1, 0.3))
-                
-                product_name = value.split('|')[0].strip()
-                price_value = value.split('|')[1].strip()
-                
-                # Convert price to float for proper formatting
+                product_name, price_value = map(str.strip, value.split('|'))
                 price = round(float(price_value), 2)
                 products.add((product_name, price))
-                
             except (IndexError, ValueError, TypeError) as e:
                 logging.warning(f"Mamedica: Error parsing product - {str(e)}")
                 continue
@@ -107,6 +88,7 @@ def scrape_mamedica(url: str) -> List[Tuple]:
     except Exception as e:
         logging.error(f"Mamedica: Unexpected error - {str(e)}")
         return []
+
 def scrape_montu(url: str) -> List[Tuple[str, float, str, str, str]]:
     """Scrape Montu products with pagination and error handling."""
     all_products = []
@@ -157,10 +139,10 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
                           availability_col: Optional[int]) -> List[dict]:
     """Generate Google Sheets formatting requests with API-compliant rules."""
     sheet_id = worksheet.id
-    requests = []
+    requests_list = []
 
     # Base cell formatting
-    requests.append({
+    requests_list.append({
         'repeatCell': {
             'range': {
                 'sheetId': sheet_id,
@@ -187,7 +169,7 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
     })
 
     # Header styling
-    requests.append({
+    requests_list.append({
         'repeatCell': {
             'range': {
                 'sheetId': sheet_id,
@@ -219,7 +201,7 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
     column_widths = {0: 180, 1: 100, 2: 80, 3: 80, 4: 110}
     for col, width in column_widths.items():
         if col < len(columns):
-            requests.append({
+            requests_list.append({
                 'updateDimensionProperties': {
                     'range': {'sheetId': sheet_id, 'dimension': 'COLUMNS', 'startIndex': col},
                     'properties': {'pixelSize': width},
@@ -229,7 +211,7 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
 
     if data:
         # Alternating row colors (API-compliant)
-        requests.append({
+        requests_list.append({
             'addConditionalFormatRule': {
                 'rule': {
                     'ranges': [{
@@ -248,7 +230,7 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
         })
 
         # Price formatting
-        requests.append({
+        requests_list.append({
             'repeatCell': {
                 'range': {'sheetId': sheet_id, 'startRowIndex': 1, 'startColumnIndex': 1},
                 'cell': {
@@ -268,7 +250,7 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
                 'startRowIndex': 1,
                 'startColumnIndex': availability_col
             }
-            requests.extend([
+            requests_list.extend([
                 {
                     'addConditionalFormatRule': {
                         'rule': {
@@ -301,7 +283,7 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
 
     # Timestamp formatting
     timestamp_row = len(data) + 2 if data else 2
-    requests.append({
+    requests_list.append({
         'repeatCell': {
             'range': {
                 'sheetId': sheet_id,
@@ -326,14 +308,14 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
     })
 
     # Freeze header row
-    requests.append({
+    requests_list.append({
         'updateSheetProperties': {
             'properties': {'sheetId': sheet_id, 'gridProperties': {'frozenRowCount': 1}},
             'fields': 'gridProperties.frozenRowCount'
         }
     })
 
-    return requests
+    return requests_list
 
 def update_google_sheet(creds: Credentials, dispensary: Dispensary, data: List[Tuple]):
     """Update Google Sheet with data and formatting."""

@@ -201,48 +201,21 @@ def _parse_cannabinoid(html: str, pattern: re.Pattern) -> str:
     return f"{match.group(1)}%" if match else "N/A"
 
 def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Optimized Google Sheets update with batch operations."""
+    """Update Google Sheet with data and formatting."""
     try:
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # 1. Bulk data update first
-        data = [config.column_headers] + [list(p) for p in products]
-        worksheet.clear()
-        worksheet.update(data, 'A1')  # Remove raw=False
-
-        # 2. Simple formatting (remove complex batch requests)
-        # Set column widths
-        for col, width in config.column_widths.items():
-            worksheet.set_column(col, col, width/6)  # Convert pixels to character width
-            
-        # Header formatting
-        worksheet.format('A1:Z1', {
-            'backgroundColor': HEADER_BG_COLOR,
-            'textFormat': {
-                'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
-                'bold': True,
-                'fontSize': 12
-            },
-            'horizontalAlignment': 'CENTER'
-        })
-
-        # 3. Currency formatting
-        if config.currency_columns:
-            for col in config.currency_columns:
-                worksheet.format(
-                    f"{gspread.utils.rowcol_to_a1(2, col+1)}:{gspread.utils.rowcol_to_a1(len(data), col+1)}",
-                    {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}
-                )
-
-        # 4. Timestamp
-        worksheet.update_cell(len(data)+2, 1, datetime.now().strftime("Updated: %H:%M %d/%m/%Y"))
-
-        logging.info(f"{config.name} sheet updated successfully")
-
+        # Prepare update data with numeric values preserved
+        validated_data = [config.column_headers] + [list(product) for product in products]
+        _update_worksheet_data(worksheet, validated_data)
+        _apply_sheet_formatting(worksheet, config, len(products))
+        logging.info("Successfully updated %s with %d products", config.name, len(products))
+    except gspread.exceptions.APIError as error:
+        logging.error("Sheets API error: %s", error.response.text)
     except Exception as error:
-        logging.error(f"Sheet update failed for {config.name}: {str(error)[:100]}...")
+        logging.error("Sheet update failed for %s: %s", config.name, error)
 
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     """Get existing worksheet or create new if it does not exist."""
@@ -497,18 +470,16 @@ def main():
 
     for dispensary in dispensaries:
         try:
-            logging.info(f"START {dispensary.name}")
-            start_total = time.monotonic()
-            
+            logging.info(f"Processing {dispensary.name}")
+            start_time = time.time()
             if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
-                sheet_start = time.monotonic()
                 update_google_sheet(credentials, dispensary, data)
-                logging.info(f"Sheet update took {time.monotonic() - sheet_start:.2f}s")
-                
-            logging.info(f"TOTAL {dispensary.name} time: {time.monotonic() - start_total:.2f}s")
-            
+                logging.info(f"Completed {dispensary.name} in {time.time() - start_time:.2f}s")
+            else:
+                logging.warning(f"No data retrieved for {dispensary.name}")
         except Exception as e:
-            logging.error(f"Fatal error: {str(e)[:100]}...")
+            logging.error(f"Fatal error processing {dispensary.name}: {str(e)}")
+            continue
 
 if __name__ == "__main__":
     main()

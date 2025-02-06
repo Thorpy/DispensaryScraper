@@ -207,31 +207,39 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # 1. Disable auto-recaling during bulk update
-        worksheet.spreadsheet.batch_update({
-            "requests": [{
-                "autoRecalc": "HOUR"
-            }]
-        })
-
-        # 2. Bulk data update
+        # 1. Bulk data update first
         data = [config.column_headers] + [list(p) for p in products]
         worksheet.clear()
-        worksheet.update(data, 'A1', raw=False)  # raw=False enables cell formatting
+        worksheet.update(data, 'A1')  # Remove raw=False
 
-        # 3. Minimal essential formatting
-        basic_formatting = [
-            _create_header_format(worksheet),
-            *_create_column_width_formats(worksheet, config),
-            _create_frozen_header_request(worksheet)
-        ]
-        worksheet.spreadsheet.batch_update({'requests': basic_formatting})
+        # 2. Simple formatting (remove complex batch requests)
+        # Set column widths
+        for col, width in config.column_widths.items():
+            worksheet.set_column(col, col, width/6)  # Convert pixels to character width
+            
+        # Header formatting
+        worksheet.format('A1:Z1', {
+            'backgroundColor': HEADER_BG_COLOR,
+            'textFormat': {
+                'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                'bold': True,
+                'fontSize': 12
+            },
+            'horizontalAlignment': 'CENTER'
+        })
 
-        # 4. Async timestamp update
-        timestamp_cell = f'A{len(data)+2}'
-        worksheet.update(timestamp_cell, [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]])
+        # 3. Currency formatting
+        if config.currency_columns:
+            for col in config.currency_columns:
+                worksheet.format(
+                    f"{gspread.utils.rowcol_to_a1(2, col+1)}:{gspread.utils.rowcol_to_a1(len(data), col+1)}",
+                    {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}
+                )
 
-        logging.info(f"{config.name} sheet updated in bulk mode")
+        # 4. Timestamp
+        worksheet.update_cell(len(data)+2, 1, datetime.now().strftime("Updated: %H:%M %d/%m/%Y"))
+
+        logging.info(f"{config.name} sheet updated successfully")
 
     except Exception as error:
         logging.error(f"Sheet update failed for {config.name}: {str(error)[:100]}...")

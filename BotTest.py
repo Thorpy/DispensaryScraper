@@ -122,49 +122,44 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
         return []
 
 def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
-    """Scrape paginated product data from Montu's JSON API with optimizations."""
+    """Single-request Montu scraper using limit=250 parameter."""
     client = create_http_client(use_cloudscraper)
     products = []
-    current_page = 1
-    max_pages = 2  # Reduced page limit due to increased items per page
-    items_per_page = 250  # Increased items per request
-
+    
     thc_pattern = re.compile(r'THC[\s:]*([\d.]+)%', re.IGNORECASE)
     cbd_pattern = re.compile(r'CBD[\s:]*([\d.]+)%', re.IGNORECASE)
 
-    while current_page <= max_pages:
-        try:
-            response = client.get(
-                f"{url}?page={current_page}&limit={items_per_page}",
-                timeout=REQUEST_TIMEOUT
-            )
-            response.raise_for_status()
-            data = response.json()
+    try:
+        # Single request with max limit
+        start_time = time.time()
+        response = client.get(
+            f"{url}?limit=250",
+            timeout=10
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Process products
+        for product in data.get('products', []):
+            if not product.get('variants'):
+                continue
+            variant = product['variants'][0]
+            try:
+                products.append((
+                    product.get('title', '').strip(),
+                    _parse_currency(variant.get('price', '0')),
+                    _parse_cannabinoid(product.get('body_html', ''), thc_pattern),
+                    _parse_cannabinoid(product.get('body_html', ''), cbd_pattern),
+                    AvailabilityStatus.AVAILABLE.value if variant.get('available')
+                    else AvailabilityStatus.NOT_AVAILABLE.value
+                ))
+            except (KeyError, ValueError) as error:
+                logging.warning("Montu product parsing error: %s", error)
 
-            if not data.get('products'):
-                break
+        logging.info(f"Montu fetched {len(products)} products in {time.time()-start_time:.2f}s")
 
-            for product in data['products']:
-                if not product.get('variants'):
-                    continue
-                variant = product['variants'][0]
-                try:
-                    products.append((
-                        product.get('title', '').strip(),
-                        _parse_currency(variant.get('price', '0')),
-                        _parse_cannabinoid(product.get('body_html', ''), thc_pattern),
-                        _parse_cannabinoid(product.get('body_html', ''), cbd_pattern),
-                        AvailabilityStatus.AVAILABLE.value if variant.get('available')
-                        else AvailabilityStatus.NOT_AVAILABLE.value
-                    ))
-                except (KeyError, ValueError) as error:
-                    logging.warning("Montu product parsing error: %s", error)
-
-            current_page += 1
-            time.sleep(random.uniform(0.5, 1.5))
-        except (requests.JSONDecodeError, requests.RequestException) as error:
-            logging.error("Montu page %d failed: %s", current_page, error)
-            break
+    except Exception as error:
+        logging.error(f"Montu request failed: {error}")
 
     return sorted(products, key=lambda x: (x[4] == AvailabilityStatus.NOT_AVAILABLE.value, x[0]))
 

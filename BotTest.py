@@ -225,6 +225,198 @@ def _apply_sheet_formatting(worksheet, config: DispensaryConfig, product_count: 
     ]
     worksheet.spreadsheet.batch_update({'requests': [r for r in requests_body if r]})
 
+def _create_header_format(worksheet) -> dict:
+    """Generate header formatting request."""
+    return {
+        'repeatCell': {
+            'range': {'sheetId': worksheet.id, 'startRowIndex': 0, 'endRowIndex': 1},
+            'cell': {
+                'userEnteredFormat': {
+                    'backgroundColor': HEADER_BG_COLOR,
+                    'textFormat': {
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                        'bold': True,
+                        'fontSize': 12
+                    },
+                    'horizontalAlignment': 'CENTER',
+                    'borders': {
+                        'top': {'style': 'SOLID', 'width': 2},
+                        'bottom': {'style': 'SOLID', 'width': 2}
+                    }
+                }
+            },
+            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,borders)'
+        }
+    }
+
+def _create_column_width_formats(worksheet, config: DispensaryConfig) -> List[dict]:
+    """Generate column width adjustment requests."""
+    return [{
+        'updateDimensionProperties': {
+            'range': {
+                'sheetId': worksheet.id,
+                'dimension': 'COLUMNS',
+                'startIndex': col,
+                'endIndex': col + 1
+            },
+            'properties': {'pixelSize': width},
+            'fields': 'pixelSize'
+        }
+    } for col, width in config.column_widths.items()]
+
+def _create_data_borders(worksheet, row_count: int, col_count: int) -> dict:
+    """Create border formatting for data range."""
+    return {
+        'updateBorders': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': col_count
+            },
+            'top': {'style': 'SOLID', 'width': 1},
+            'bottom': {'style': 'SOLID', 'width': 1},
+            'left': {'style': 'SOLID', 'width': 1},
+            'right': {'style': 'SOLID', 'width': 1},
+            'innerHorizontal': {'style': 'SOLID', 'width': 1},
+            'innerVertical': {'style': 'SOLID', 'width': 1}
+        }
+    }
+
+def _create_currency_formats(worksheet, config: DispensaryConfig, row_count: int) -> List[dict]:
+    """Generate currency formatting requests."""
+    return [{
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 1,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': col,
+                'endColumnIndex': col + 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'numberFormat': {
+                        'type': 'CURRENCY',
+                        'pattern': '[$£-809]#,##0.00'
+                    },
+                    'horizontalAlignment': 'RIGHT'
+                }
+            },
+            'fields': 'userEnteredFormat(numberFormat,horizontalAlignment)'
+        }
+    } for col in config.currency_columns]
+
+def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
+    """Create alternating row color rule."""
+    return {
+        'addConditionalFormatRule': {
+            'rule': {
+                'ranges': [{
+                    'sheetId': worksheet.id,
+                    'startRowIndex': 1,
+                    'endRowIndex': row_count + 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': col_count
+                }],
+                'booleanRule': {
+                    'condition': {
+                        'type': 'CUSTOM_FORMULA',
+                        'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
+                    },
+                    'format': {'backgroundColor': ALTERNATING_ROW_COLOR}
+                }
+            }
+        }
+    }
+
+def _create_availability_rules(worksheet, config: DispensaryConfig, row_count: int) -> List[dict]:
+    """Generate availability formatting rules."""
+    if config.availability_column is None:
+        return []
+    col = config.availability_column
+    range_def = {
+        'sheetId': worksheet.id,
+        'startRowIndex': 1,
+        'endRowIndex': row_count + 1,
+        'startColumnIndex': col,
+        'endColumnIndex': col + 1
+    }
+    return [
+        {
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [range_def],
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'TEXT_EQ',
+                            'values': [{'userEnteredValue': AvailabilityStatus.NOT_AVAILABLE.value}]
+                        },
+                        'format': {
+                            'backgroundColor': UNAVAILABLE_COLOR,
+                            'textFormat': {'bold': True}
+                        }
+                    }
+                }
+            }
+        },
+        {
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [range_def],
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'TEXT_EQ',
+                            'values': [{'userEnteredValue': AvailabilityStatus.AVAILABLE.value}]
+                        },
+                        'format': {
+                            'backgroundColor': AVAILABLE_COLOR,
+                            'textFormat': {'bold': True}
+                        }
+                    }
+                }
+            }
+        }
+    ]
+
+def _create_timestamp_format(worksheet, row_count: int) -> dict:
+    """Create timestamp formatting request."""
+    return {
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': row_count + 2,
+                'endRowIndex': row_count + 3,
+                'startColumnIndex': 0,
+                'endColumnIndex': 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'textFormat': {
+                        'italic': True,
+                        'fontSize': 10,
+                        'foregroundColor': TIMESTAMP_COLOR
+                    },
+                    'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
+                }
+            },
+            'fields': 'userEnteredFormat(textFormat,backgroundColor)'
+        }
+    }
+
+def _create_frozen_header_request(worksheet) -> dict:
+    """Create request to freeze header row."""
+    return {
+        'updateSheetProperties': {
+            'properties': {
+                'sheetId': worksheet.id,
+                'gridProperties': {'frozenRowCount': 1}
+            },
+            'fields': 'gridProperties.frozenRowCount'
+        }
+    }
+
 def main():
     credentials = load_google_credentials()
     if not credentials:

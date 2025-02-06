@@ -201,21 +201,40 @@ def _parse_cannabinoid(html: str, pattern: re.Pattern) -> str:
     return f"{match.group(1)}%" if match else "N/A"
 
 def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Update Google Sheet with data and formatting."""
+    """Optimized Google Sheets update with batch operations."""
     try:
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Prepare update data with numeric values preserved
-        validated_data = [config.column_headers] + [list(product) for product in products]
-        _update_worksheet_data(worksheet, validated_data)
-        _apply_sheet_formatting(worksheet, config, len(products))
-        logging.info("Successfully updated %s with %d products", config.name, len(products))
-    except gspread.exceptions.APIError as error:
-        logging.error("Sheets API error: %s", error.response.text)
+        # 1. Disable auto-recaling during bulk update
+        worksheet.spreadsheet.batch_update({
+            "requests": [{
+                "autoRecalc": "HOUR"
+            }]
+        })
+
+        # 2. Bulk data update
+        data = [config.column_headers] + [list(p) for p in products]
+        worksheet.clear()
+        worksheet.update(data, 'A1', raw=False)  # raw=False enables cell formatting
+
+        # 3. Minimal essential formatting
+        basic_formatting = [
+            _create_header_format(worksheet),
+            *_create_column_width_formats(worksheet, config),
+            _create_frozen_header_request(worksheet)
+        ]
+        worksheet.spreadsheet.batch_update({'requests': basic_formatting})
+
+        # 4. Async timestamp update
+        timestamp_cell = f'A{len(data)+2}'
+        worksheet.update(timestamp_cell, [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]])
+
+        logging.info(f"{config.name} sheet updated in bulk mode")
+
     except Exception as error:
-        logging.error("Sheet update failed for %s: %s", config.name, error)
+        logging.error(f"Sheet update failed for {config.name}: {str(error)[:100]}...")
 
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     """Get existing worksheet or create new if it does not exist."""
@@ -470,16 +489,18 @@ def main():
 
     for dispensary in dispensaries:
         try:
-            logging.info(f"Processing {dispensary.name}")
-            start_time = time.time()
+            logging.info(f"START {dispensary.name}")
+            start_total = time.monotonic()
+            
             if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
+                sheet_start = time.monotonic()
                 update_google_sheet(credentials, dispensary, data)
-                logging.info(f"Completed {dispensary.name} in {time.time() - start_time:.2f}s")
-            else:
-                logging.warning(f"No data retrieved for {dispensary.name}")
+                logging.info(f"Sheet update took {time.monotonic() - sheet_start:.2f}s")
+                
+            logging.info(f"TOTAL {dispensary.name} time: {time.monotonic() - start_total:.2f}s")
+            
         except Exception as e:
-            logging.error(f"Fatal error processing {dispensary.name}: {str(e)}")
-            continue
+            logging.error(f"Fatal error: {str(e)[:100]}...")
 
 if __name__ == "__main__":
     main()

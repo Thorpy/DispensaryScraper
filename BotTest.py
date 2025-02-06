@@ -122,60 +122,70 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
         return []
 
 def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
-    """Optimized for Raspberry Pi with simplified parsing."""
+    """Ultra-optimized Montu scraper for Raspberry Pi."""
     client = create_http_client(use_cloudscraper)
-    
-    # Pre-compiled patterns
-    thc_cbd_pattern = re.compile(
-        r'(THC|CBD)[\s:]*([\d.]+)%', 
-        re.IGNORECASE
-    )
+    products = []
     
     try:
-        # Single request with timing
-        start = time.monotonic()
-        response = client.get(f"{url}?limit=250", timeout=10)
+        # 1. Fetch Data with Timing
+        start_fetch = time.monotonic()
+        response = client.get(f"{url}?limit=250", timeout=15)
         response.raise_for_status()
+        fetch_time = time.monotonic() - start_fetch
+        
+        # 2. Efficient JSON Parsing
+        start_parse = time.monotonic()
         data = response.json()
+        products_data = data.get('products', [])
         
-        # Pre-allocate list size
-        products = []
-        products_append = products.append  # Avoid method lookup overhead
+        # 3. Precompute Static Values
+        available_str = AvailabilityStatus.AVAILABLE.value
+        not_available_str = AvailabilityStatus.NOT_AVAILABLE.value
         
-        # Process products with simplified parsing
-        for product in data.get('products', []):
-            if not product.get('variants'):
-                continue
-            
-            # Basic fields
-            title = product.get('title', '').strip()
-            price = product['variants'][0].get('price', '0')
-            available = product['variants'][0].get('available', False)
-            
-            # Combined cannabinoid parsing
+        # 4. Streamlined Processing
+        for product in products_data:
+            variant = product.get('variants', [{}])[0]
             body_html = product.get('body_html', '')
-            cannabinoids = {'thc': 'N/A', 'cbd': 'N/A'}
-            for match in thc_cbd_pattern.finditer(body_html):
-                key = match.group(1).lower()
-                cannabinoids[key] = f"{match.group(2)}%"
             
-            # Build product tuple
-            products_append((
-                title,
-                float(price.replace('£', '').replace(',', '')),  # Faster than regex
-                cannabinoids['thc'],
-                cannabinoids['cbd'],
-                'Available' if available else 'Not Available'
-            ))
+            # Title and Price
+            product_tuple = (
+                product.get('title', '').strip(),
+                float(variant.get('price', '0').replace('£', '').replace(',', '') or '0'),
+                'N/A',  # THC default
+                'N/A',  # CBD default
+                available_str if variant.get('available') else not_available_str
+            )
+            
+            # Fast Cannabinoid Extraction
+            lower_body = body_html.lower()
+            for marker in ['thc', 'cbd']:
+                idx = lower_body.find(marker)
+                if idx != -1:
+                    value_str = body_html[idx+len(marker):idx+len(marker)+10].split('%')[0].strip()
+                    if value_str.replace('.', '').isdigit():
+                        product_tuple = (
+                            *product_tuple[:2 if marker == 'thc' else 3],
+                            f"{value_str}%",
+                            *product_tuple[3 if marker == 'thc' else 4:]
+                        )
+            
+            products.append(product_tuple)
         
-        # Fast sorting with pre-computed key
-        products.sort(key=lambda x: (x[4] == 'Not Available', x[0]))
+        parse_time = time.monotonic() - start_parse
         
-        logging.info(f"Montu processed {len(products)} products in {time.monotonic()-start:.2f}s")
+        # 5. Efficient Sorting
+        products.sort(key=lambda x: (x[4] == not_available_str, x[0]))
+        
+        # 6. Diagnostic Logging
+        logging.info(
+            f"Montu: {len(products)} products | "
+            f"Fetch: {fetch_time:.2f}s | "
+            f"Parse: {parse_time:.2f}s"
+        )
         return products
         
     except Exception as error:
-        logging.error(f"Montu error: {error}")
+        logging.error(f"Montu failure: {str(error)[:100]}...")
         return []
         
 def _parse_currency(price_str: str) -> float:

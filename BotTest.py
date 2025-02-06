@@ -122,47 +122,62 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
         return []
 
 def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
-    """Single-request Montu scraper using limit=250 parameter."""
+    """Optimized for Raspberry Pi with simplified parsing."""
     client = create_http_client(use_cloudscraper)
-    products = []
     
-    thc_pattern = re.compile(r'THC[\s:]*([\d.]+)%', re.IGNORECASE)
-    cbd_pattern = re.compile(r'CBD[\s:]*([\d.]+)%', re.IGNORECASE)
-
+    # Pre-compiled patterns
+    thc_cbd_pattern = re.compile(
+        r'(THC|CBD)[\s:]*([\d.]+)%', 
+        re.IGNORECASE
+    )
+    
     try:
-        # Single request with max limit
-        start_time = time.time()
-        response = client.get(
-            f"{url}?limit=250",
-            timeout=10
-        )
+        # Single request with timing
+        start = time.monotonic()
+        response = client.get(f"{url}?limit=250", timeout=10)
         response.raise_for_status()
         data = response.json()
         
-        # Process products
+        # Pre-allocate list size
+        products = []
+        products_append = products.append  # Avoid method lookup overhead
+        
+        # Process products with simplified parsing
         for product in data.get('products', []):
             if not product.get('variants'):
                 continue
-            variant = product['variants'][0]
-            try:
-                products.append((
-                    product.get('title', '').strip(),
-                    _parse_currency(variant.get('price', '0')),
-                    _parse_cannabinoid(product.get('body_html', ''), thc_pattern),
-                    _parse_cannabinoid(product.get('body_html', ''), cbd_pattern),
-                    AvailabilityStatus.AVAILABLE.value if variant.get('available')
-                    else AvailabilityStatus.NOT_AVAILABLE.value
-                ))
-            except (KeyError, ValueError) as error:
-                logging.warning("Montu product parsing error: %s", error)
-
-        logging.info(f"Montu fetched {len(products)} products in {time.time()-start_time:.2f}s")
-
+            
+            # Basic fields
+            title = product.get('title', '').strip()
+            price = product['variants'][0].get('price', '0')
+            available = product['variants'][0].get('available', False)
+            
+            # Combined cannabinoid parsing
+            body_html = product.get('body_html', '')
+            cannabinoids = {'thc': 'N/A', 'cbd': 'N/A'}
+            for match in thc_cbd_pattern.finditer(body_html):
+                key = match.group(1).lower()
+                cannabinoids[key] = f"{match.group(2)}%"
+            
+            # Build product tuple
+            products_append((
+                title,
+                float(price.replace('£', '').replace(',', '')),  # Faster than regex
+                cannabinoids['thc'],
+                cannabinoids['cbd'],
+                'Available' if available else 'Not Available'
+            ))
+        
+        # Fast sorting with pre-computed key
+        products.sort(key=lambda x: (x[4] == 'Not Available', x[0]))
+        
+        logging.info(f"Montu processed {len(products)} products in {time.monotonic()-start:.2f}s")
+        return products
+        
     except Exception as error:
-        logging.error(f"Montu request failed: {error}")
-
-    return sorted(products, key=lambda x: (x[4] == AvailabilityStatus.NOT_AVAILABLE.value, x[0]))
-
+        logging.error(f"Montu error: {error}")
+        return []
+        
 def _parse_currency(price_str: str) -> float:
     """Safely convert currency string to float."""
     try:

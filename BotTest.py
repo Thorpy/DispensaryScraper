@@ -152,26 +152,27 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Clear and update data
+        # Clear and update data in one go
         data = [config.column_headers] + [list(p) for p in products]
         worksheet.batch_clear(["A:Z"])
-        worksheet.update(range_name='A1', values=data)
+        worksheet.update('A1', data)  # Use bulk update
 
-        row_count = len(products)  # Ensure this is defined
-        
+        row_count = len(products)
+        col_count = len(config.column_headers)
+
         # Prepare all formatting requests
         format_requests = [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             _create_currency_formats(config, worksheet, row_count),
-            _create_row_color_rule(worksheet, row_count, len(config.column_headers)),
+            _create_row_color_rule(worksheet, row_count, col_count),
             _create_availability_rules(config, worksheet, row_count),
-            _create_data_borders(worksheet, row_count, len(config.column_headers)),
+            _create_data_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, len(data) + 2)
         ]
 
-        # Add timestamp
+        # Add timestamp in a single update
         timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
         worksheet.update(range_name=f'A{len(data)+2}', values=timestamp)
 
@@ -184,6 +185,7 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
 
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
+
 
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     """Worksheet management with error handling."""
@@ -274,7 +276,7 @@ def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
             'rule': {
                 'ranges': [{
                     'sheetId': worksheet.id,
-                    'startRowIndex': 1,
+                    'startRowIndex': 1,  # Starts from row 1 to skip header
                     'endRowIndex': row_count + 1,
                     'startColumnIndex': 0,
                     'endColumnIndex': col_count
@@ -289,6 +291,7 @@ def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
             }
         }
     }
+
 
 def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
     if config.availability_column is None:

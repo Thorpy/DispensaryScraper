@@ -146,58 +146,85 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         return []
 
 def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Ultra-optimized Google Sheets update with precise formatting."""
+    """Fixed batch update with proper data formatting."""
     try:
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Calculate dimensions
+        # Prepare data
         row_count = len(products)
         col_count = len(config.column_headers)
-        data_range = f"A1:{gspread.utils.rowcol_to_a1(row_count + 1, col_count)}"  # +1 for header
+        data = [config.column_headers] + [list(p) for p in products]
+        
+        # Convert data to proper batch format
+        rows = []
+        for row in data:
+            row_data = []
+            for cell in row:
+                if isinstance(cell, (int, float)):
+                    row_data.append({'userEnteredValue': {'numberValue': cell}})
+                else:
+                    row_data.append({'userEnteredValue': {'stringValue': str(cell)}})
+            rows.append({'values': row_data})
 
-        # Batch update data and formatting
-        requests = [
-            # Clear existing data and formatting
-            {
-                'updateCells': {
-                    'range': {'sheetId': worksheet.id, 'startRowIndex': 0},
-                    'fields': 'userEnteredFormat'
+        # Prepare timestamp
+        timestamp_row = [{
+            'values': [{
+                'userEnteredValue': {'stringValue': datetime.now().strftime("Updated: %H:%M %d/%m/%Y")},
+                'userEnteredFormat': {
+                    'textFormat': {
+                        'italic': True,
+                        'fontSize': 10,
+                        'foregroundColor': TIMESTAMP_COLOR
+                    },
+                    'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
                 }
-            },
-            # Update data
+            }]
+        }]
+
+        # Build batch update requests
+        requests = [
+            # Clear existing content
             {
                 'updateCells': {
                     'range': {'sheetId': worksheet.id},
-                    'rows': [{'values': [{'userEnteredValue': cell} for cell in row]} 
-                            for row in [config.column_headers] + [list(p) for p in products]],
-                    'fields': 'userEnteredValue'
+                    'fields': 'userEnteredValue,userEnteredFormat'
                 }
             },
-            # Add timestamp
+            # Update main data
             {
                 'updateCells': {
-                    'range': {'sheetId': worksheet.id, 'startRowIndex': row_count + 2},
-                    'rows': [{'values': [{'userEnteredValue': datetime.now().strftime("Updated: %H:%M %d/%m/%Y")}]}],
+                    'range': {'sheetId': worksheet.id},
+                    'rows': rows,
                     'fields': 'userEnteredValue'
                 }
             },
-            # Apply all formatting
+            # Update timestamp
+            {
+                'updateCells': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': row_count + 1,
+                        'endRowIndex': row_count + 2
+                    },
+                    'rows': timestamp_row,
+                    'fields': 'userEnteredValue,userEnteredFormat'
+                }
+            },
+            # Apply formatting
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             _create_currency_formats(config, worksheet, row_count),
             _create_row_color_rule(worksheet, row_count, col_count),
             _create_availability_rules(config, worksheet, row_count),
             _create_data_borders(worksheet, row_count, col_count),
-            _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, row_count + 2)
+            _create_frozen_header(worksheet)
         ]
 
-        # Execute single batch update
+        # Execute batch update
         worksheet.spreadsheet.batch_update({'requests': [r for r in requests if r]})
-
-        logging.info(f"{config.name} sheet updated in single batch")
+        logging.info(f"{config.name} sheet updated successfully")
 
     except Exception as error:
         logging.error("Sheet update failed: %s", error)

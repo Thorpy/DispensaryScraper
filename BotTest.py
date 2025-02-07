@@ -329,7 +329,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
     ]]
 
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
-    """Simplified border application (outer borders only)."""
+    """Simplified border application (outer borders only, this saves 80 seconds!?)."""
     return {
         'updateBorders': {
             'range': {

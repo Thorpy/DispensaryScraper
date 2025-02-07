@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Optimized web scraper with timestamp fix and performance improvements."""
+"""Optimized web scraper with timeout fixes and Sheets optimizations."""
 
 import os
 import re
@@ -20,14 +20,11 @@ from google.oauth2.service_account import Credentials
 
 # Constants -------------------------------------------------------------------
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-REQUEST_TIMEOUT = 15  # Reduced from 25
+REQUEST_TIMEOUT = 25  # Increased timeout
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
-# Formatting constants (keep your preferred colors)
+# Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-ALTERNATING_ROW_COLOR = {'red': 0.98, 'green': 0.98, 'blue': 0.98}
-UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}
-AVAILABLE_COLOR = {'red': 0.9, 'green': 1, 'blue': 0.9}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # Configure logging
@@ -48,7 +45,6 @@ class DispensaryConfig:
     column_headers: List[str]
     column_widths: Dict[int, int]
     currency_columns: List[int] = None
-    availability_column: Optional[int] = None
     use_cloudscraper: bool = True
 
 class AvailabilityStatus(Enum):
@@ -67,14 +63,14 @@ def load_google_credentials() -> Optional[Credentials]:
         return None
 
 def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
-    """Create optimized HTTP client."""
+    """Create optimized HTTP client with retries."""
     if use_cloudscraper:
-        return cloudscraper.create_scraper(browser='chrome')
+        return cloudscraper.create_scraper()
     
     session = requests.Session()
     retry = Retry(
         total=3,
-        backoff_factor=0.5,
+        backoff_factor=1,
         status_forcelist=[429, 500, 502, 503, 504]
     )
     session.mount('https://', HTTPAdapter(max_retries=retry))
@@ -82,12 +78,12 @@ def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
     return session
 
 def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float]]:
-    """Optimized Mamedica scraper."""
+    """Mamedica scraper with timeout handling."""
+    client = create_http_client(use_cloudscraper)
     try:
-        client = create_http_client(use_cloudscraper)
         response = client.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-
+        
         products = set()
         soup = BeautifulSoup(response.text, 'html.parser')
         
@@ -101,39 +97,32 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
 
         return sorted(products, key=lambda x: x[0])
     
+    except requests.exceptions.Timeout:
+        logging.error("Mamedica request timed out")
+        return []
     except Exception as error:
         logging.error("Mamedica error: %s", error)
         return []
 
 def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
-    """Ultra-fast Montu scraper with combined regex."""
+    """Optimized Montu scraper."""
     client = create_http_client(use_cloudscraper)
-    products = []
-    
     try:
         start_time = time.monotonic()
         response = client.get(f"{url}?limit=250", timeout=10)
         response.raise_for_status()
         data = response.json()
         
-        # Pre-compiled combined regex
-        cannabinoid_pattern = re.compile(
-            r'(THC|CBD)[\s:]*([\d.]+)%', 
-            re.IGNORECASE
-        )
+        products = []
+        cannabinoid_pattern = re.compile(r'(THC|CBD)[\s:]*([\d.]+)%', re.IGNORECASE)
         
         for product in data.get('products', []):
             if not product.get('variants'):
                 continue
             
             variant = product['variants'][0]
-            body_html = product.get('body_html', '')
-            
-            # Find all cannabinoid matches at once
-            cannabinoids = {
-                match[0].lower(): f"{match[1]}%"
-                for match in cannabinoid_pattern.findall(body_html)
-            }
+            matches = cannabinoid_pattern.findall(product.get('body_html', ''))
+            cannabinoids = {m[0].lower(): f"{m[1]}%" for m in matches}
             
             products.append((
                 product.get('title', '').strip(),
@@ -144,9 +133,7 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
                 else AvailabilityStatus.NOT_AVAILABLE.value
             ))
         
-        # Sort once at the end
         products.sort(key=lambda x: (x[4] == AvailabilityStatus.NOT_AVAILABLE.value, x[0]))
-        
         logging.info(f"Montu: Processed {len(products)} products in {time.monotonic()-start_time:.2f}s")
         return products
     
@@ -161,25 +148,25 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Prepare data with timestamp row
+        # Update data
         data = [config.column_headers] + [list(p) for p in products]
-        timestamp_row = [datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]
-        
-        # Batch update
-        worksheet.batch_clear(["A:Z"])  # Clear entire sheet
-        worksheet.update(data, 'A1')  # Main data
-        worksheet.update(f'A{len(data)+2}', [timestamp_row])  # Timestamp
+        worksheet.batch_clear(["A1:Z"])  # Clear existing data
+        worksheet.update(values=data, range_name='A1')  # Fixed argument order
 
-        # Essential formatting only
+        # Apply essential formatting
         format_requests = [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             _create_currency_formats(config, worksheet, len(products)),
-            _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, len(data) + 2)
+            _create_frozen_header(worksheet)
         ]
         
-        # Execute valid requests
+        # Add timestamp
+        timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+        worksheet.update(values=timestamp, range_name=f'A{len(data)+2}')
+        format_requests.append(_create_timestamp_format(worksheet, len(data)+2))
+
+        # Execute formatting requests
         valid_requests = [r for r in format_requests if r]
         if valid_requests:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
@@ -190,13 +177,13 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         logging.error("Sheet update failed: %s", error)
 
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
-    """Get or create worksheet with error handling."""
+    """Worksheet management with error handling."""
     try:
         return spreadsheet.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
-        return spreadsheet.add_worksheet(sheet_name, rows=100, cols=20)
+        return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
-# Optimized formatting functions ----------------------------------------------
+# Formatting functions --------------------------------------------------------
 def _create_header_format(worksheet) -> dict:
     return {
         'repeatCell': {
@@ -279,11 +266,10 @@ def _create_timestamp_format(worksheet, row: int) -> dict:
                         'italic': True,
                         'fontSize': 10,
                         'foregroundColor': TIMESTAMP_COLOR
-                    },
-                    'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
+                    }
                 }
             },
-            'fields': 'userEnteredFormat(textFormat,backgroundColor)'
+            'fields': 'userEnteredFormat.textFormat'
         }
     }
 
@@ -313,26 +299,24 @@ def main():
             column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
             column_widths={0: 220, 1: 100, 2: 80, 3: 80, 4: 120},
             currency_columns=[1],
-            availability_column=4,
             use_cloudscraper=True
         )
     ]
 
     for dispensary in dispensaries:
+        start_time = time.monotonic()
+        logging.info(f"Starting {dispensary.name}")
+        
         try:
-            start_time = time.monotonic()
-            logging.info(f"Starting {dispensary.name}")
-            
             data = dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper)
             if data:
                 update_start = time.monotonic()
                 update_google_sheet(credentials, dispensary, data)
                 logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
-            
-            logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
-            
         except Exception as e:
             logging.error(f"Error processing {dispensary.name}: {str(e)}")
+        
+        logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
 
 if __name__ == "__main__":
     main()

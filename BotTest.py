@@ -18,6 +18,20 @@ from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 
+@dataclass
+class DispensaryConfig:
+    """Configuration for dispensary scraping and spreadsheet settings."""
+    name: str
+    url: str
+    spreadsheet_id: str
+    sheet_name: str
+    scrape_method: Callable
+    column_headers: List[str]
+    column_widths: Dict[int, int]
+    currency_columns: List[int] = None
+    availability_column: Optional[int] = None
+    use_cloudscraper: bool = True
+
 # ============================= CONFIGURATION ==============================
 DISPENSARIES = [
     DispensaryConfig(
@@ -56,19 +70,6 @@ AVAILABLE_COLOR = {'red': 0.9, 'green': 1, 'blue': 0.9}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
-@dataclass
-class DispensaryConfig:
-    """Configuration for dispensary scraping and spreadsheet settings."""
-    name: str
-    url: str
-    spreadsheet_id: str
-    sheet_name: str
-    scrape_method: Callable
-    column_headers: List[str]
-    column_widths: Dict[int, int]
-    currency_columns: List[int] = None
-    availability_column: Optional[int] = None
-    use_cloudscraper: bool = True
 
 class AvailabilityStatus(Enum):
     AVAILABLE = 'Available'

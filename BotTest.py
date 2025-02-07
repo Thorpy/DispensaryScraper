@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Optimized scraper with formatting fixes and cloud-optimized Sheets updates."""
+"""Optimized scraper with performance improvements and formatting fixes."""
 
 import os
 import re
@@ -178,10 +178,8 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         data += [[]] * 2  # Add empty rows for timestamp placement
         data.append(timestamp[0])
 
-        # Clear content and reset formatting
+        # Clear content and update data
         worksheet.batch_clear(["A:Z"])
-        
-        # Update data and timestamp in one batch
         worksheet.update(data, 'A1')
 
         row_count = len(products)
@@ -189,28 +187,15 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
 
         # Prepare formatting requests
         format_requests = delete_requests + [
-            # Clear existing formatting in data range
-            {
-                "repeatCell": {
-                    "range": {
-                        "sheetId": worksheet.id,
-                        "startRowIndex": 0,
-                        "endRowIndex": timestamp_row + 1,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": col_count
-                    },
-                    "cell": {"userEnteredFormat": {}},
-                    "fields": "userEnteredFormat"
-                }
-            },
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
             _create_row_color_rule(worksheet, row_count, col_count),
             *_create_availability_rules(config, worksheet, row_count),
-            _create_optimized_borders(worksheet, row_count, col_count),  # Simplified borders
+            _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, timestamp_row)
+            _create_timestamp_format(worksheet, timestamp_row),
+            *_create_text_alignment(worksheet, row_count, config)
         ]
 
         # Execute batch update
@@ -223,27 +208,6 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
 
-def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
-    """Simplified border application (outer borders only)."""
-    return {
-        'updateBorders': {
-            'range': {
-                'sheetId': worksheet.id,
-                'startRowIndex': 0,
-                'endRowIndex': row_count + 1,
-                'startColumnIndex': 0,
-                'endColumnIndex': col_count
-            },
-            'top': {'style': 'SOLID', 'width': 1},
-            'bottom': {'style': 'SOLID', 'width': 1},
-            'left': {'style': 'SOLID', 'width': 1},
-            'right': {'style': 'SOLID', 'width': 1},
-            'innerHorizontal': {'style': 'NONE'},
-            'innerVertical': {'style': 'NONE'}
-        }
-    }
-
-
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     """Worksheet management with error handling."""
     try:
@@ -252,26 +216,6 @@ def _get_or_create_worksheet(spreadsheet, sheet_name: str):
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
 # Formatting functions --------------------------------------------------------
-def _create_data_borders(worksheet, row_count: int, col_count: int) -> dict:
-    """Precise border range calculation."""
-    return {
-        'updateBorders': {
-            'range': {
-                'sheetId': worksheet.id,
-                'startRowIndex': 0,
-                'endRowIndex': row_count + 1,  # Header + data rows
-                'startColumnIndex': 0,
-                'endColumnIndex': col_count
-            },
-            'top': {'style': 'SOLID', 'width': 1},
-            'bottom': {'style': 'SOLID', 'width': 1},
-            'left': {'style': 'SOLID', 'width': 1},
-            'right': {'style': 'SOLID', 'width': 1},
-            'innerHorizontal': {'style': 'SOLID', 'width': 1},
-            'innerVertical': {'style': 'SOLID', 'width': 1}
-        }
-    }
-
 def _create_header_format(worksheet) -> dict:
     return {
         'repeatCell': {
@@ -284,10 +228,11 @@ def _create_header_format(worksheet) -> dict:
                         'bold': True,
                         'fontSize': 12
                     },
-                    'horizontalAlignment': 'CENTER'
+                    'horizontalAlignment': 'CENTER',
+                    'wrapStrategy': 'WRAP'
                 }
             },
-            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
+            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
         }
     }
 
@@ -333,7 +278,7 @@ def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
             'rule': {
                 'ranges': [{
                     'sheetId': worksheet.id,
-                    'startRowIndex': 1,  # Starts from row 1 to skip header
+                    'startRowIndex': 1,
                     'endRowIndex': row_count + 1,
                     'startColumnIndex': 0,
                     'endColumnIndex': col_count
@@ -348,7 +293,6 @@ def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
             }
         }
     }
-
 
 def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
     if config.availability_column is None:
@@ -384,6 +328,26 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
         (AvailabilityStatus.AVAILABLE, AVAILABLE_COLOR)
     ]]
 
+def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
+    """Simplified border application (outer borders only)."""
+    return {
+        'updateBorders': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': col_count
+            },
+            'top': {'style': 'SOLID', 'width': 1},
+            'bottom': {'style': 'SOLID', 'width': 1},
+            'left': {'style': 'SOLID', 'width': 1},
+            'right': {'style': 'SOLID', 'width': 1},
+            'innerHorizontal': {'style': 'NONE'},
+            'innerVertical': {'style': 'NONE'}
+        }
+    }
+
 def _create_frozen_header(worksheet) -> dict:
     return {
         'updateSheetProperties': {
@@ -394,6 +358,34 @@ def _create_frozen_header(worksheet) -> dict:
             'fields': 'gridProperties.frozenRowCount'
         }
     }
+
+def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) -> List[dict]:
+    """Set column-specific alignment."""
+    alignments = {
+        0: 'LEFT',    # Product name
+        1: 'RIGHT',   # Price
+        2: 'CENTER',  # THC %
+        3: 'CENTER',  # CBD %
+        4: 'CENTER'   # Availability
+    }
+    return [{
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 1,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': col,
+                'endColumnIndex': col + 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'horizontalAlignment': alignment,
+                    'wrapStrategy': 'WRAP' if col == 0 else 'OVERFLOW_CELL'
+                }
+            },
+            'fields': 'userEnteredFormat(horizontalAlignment,wrapStrategy)'
+        }
+    } for col, alignment in alignments.items()]
 
 def _create_timestamp_format(worksheet, row: int) -> dict:
     return {
@@ -443,7 +435,7 @@ def main():
             sheet_name="Montu List",
             scrape_method=scrape_montu_products,
             column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
-            column_widths={0: 220, 1: 100, 2: 80, 3: 80, 4: 120},
+            column_widths={0: 320, 1: 120, 2: 100, 3: 100, 4: 140},
             currency_columns=[1],
             availability_column=4,
             use_cloudscraper=True

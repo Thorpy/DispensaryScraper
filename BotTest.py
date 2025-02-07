@@ -171,31 +171,49 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
             for index in reversed(range(len(existing_rules)))
         ]
 
-        # Clear and update data in one go
+        # Prepare data and timestamp
         data = [config.column_headers] + [list(p) for p in products]
+        timestamp_row = len(data) + 2
+        timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+        data += [[]] * 2  # Add empty rows for timestamp placement
+        data.append(timestamp[0])
+
+        # Clear content and reset formatting
         worksheet.batch_clear(["A:Z"])
-        worksheet.update(data, 'A1')  # Use bulk update
+        
+        # Update data and timestamp in one batch
+        worksheet.update(data, 'A1')
 
         row_count = len(products)
         col_count = len(config.column_headers)
 
-        # Prepare all formatting requests including deletion of old rules
+        # Prepare formatting requests
         format_requests = delete_requests + [
+            # Clear existing formatting in data range
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "startRowIndex": 0,
+                        "endRowIndex": timestamp_row + 1,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": col_count
+                    },
+                    "cell": {"userEnteredFormat": {}},
+                    "fields": "userEnteredFormat"
+                }
+            },
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
             _create_row_color_rule(worksheet, row_count, col_count),
             *_create_availability_rules(config, worksheet, row_count),
-            _create_data_borders(worksheet, row_count, col_count),
+            _create_optimized_borders(worksheet, row_count, col_count),  # Simplified borders
             _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, len(data) + 2)
+            _create_timestamp_format(worksheet, timestamp_row)
         ]
 
-        # Add timestamp in a single update
-        timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-        worksheet.update(range_name=f'A{len(data)+2}', values=timestamp)
-
-        # Execute all formatting in one batch
+        # Execute batch update
         valid_requests = [r for r in format_requests if r]
         if valid_requests:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
@@ -204,6 +222,26 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
 
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
+
+def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
+    """Simplified border application (outer borders only)."""
+    return {
+        'updateBorders': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': col_count
+            },
+            'top': {'style': 'SOLID', 'width': 1},
+            'bottom': {'style': 'SOLID', 'width': 1},
+            'left': {'style': 'SOLID', 'width': 1},
+            'right': {'style': 'SOLID', 'width': 1},
+            'innerHorizontal': {'style': 'NONE'},
+            'innerVertical': {'style': 'NONE'}
+        }
+    }
 
 
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):

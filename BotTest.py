@@ -146,89 +146,51 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         return []
 
 def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Fixed batch update with proper data formatting."""
+    """Optimized Google Sheets update with full formatting."""
     try:
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Prepare data
-        row_count = len(products)
-        col_count = len(config.column_headers)
+        # Clear and update data
         data = [config.column_headers] + [list(p) for p in products]
-        
-        # Convert data to proper batch format
-        rows = []
-        for row in data:
-            row_data = []
-            for cell in row:
-                if isinstance(cell, (int, float)):
-                    row_data.append({'userEnteredValue': {'numberValue': cell}})
-                else:
-                    row_data.append({'userEnteredValue': {'stringValue': str(cell)}})
-            rows.append({'values': row_data})
+        worksheet.batch_clear(["A:Z"])
+        worksheet.update(range_name='A1', values=data)
 
-        # Prepare timestamp
-        timestamp_row = [{
-            'values': [{
-                'userEnteredValue': {'stringValue': datetime.now().strftime("Updated: %H:%M %d/%m/%Y")},
-                'userEnteredFormat': {
-                    'textFormat': {
-                        'italic': True,
-                        'fontSize': 10,
-                        'foregroundColor': TIMESTAMP_COLOR
-                    },
-                    'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
-                }
-            }]
-        }]
-
-        # Build batch update requests
-        requests = [
-            # Clear existing content
-            {
-                'updateCells': {
-                    'range': {'sheetId': worksheet.id},
-                    'fields': 'userEnteredValue,userEnteredFormat'
-                }
-            },
-            # Update main data
-            {
-                'updateCells': {
-                    'range': {'sheetId': worksheet.id},
-                    'rows': rows,
-                    'fields': 'userEnteredValue'
-                }
-            },
-            # Update timestamp
-            {
-                'updateCells': {
-                    'range': {
-                        'sheetId': worksheet.id,
-                        'startRowIndex': row_count + 1,
-                        'endRowIndex': row_count + 2
-                    },
-                    'rows': timestamp_row,
-                    'fields': 'userEnteredValue,userEnteredFormat'
-                }
-            },
-            # Apply formatting
+        # Prepare all formatting requests
+        format_requests = [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
-            _create_currency_formats(config, worksheet, row_count),
-            _create_row_color_rule(worksheet, row_count, col_count),
-            _create_availability_rules(config, worksheet, row_count),
+            _create_currency_formats(config, worksheet, len(products)),
+            _create_row_color_rule(worksheet, len(products), len(config.column_headers)),
+            _create_availability_rules(config, worksheet, len(products)),
             _create_data_borders(worksheet, row_count, col_count),
-            _create_frozen_header(worksheet)
+            _create_frozen_header(worksheet),
+            _create_timestamp_format(worksheet, len(data) + 2)
         ]
 
-        # Execute batch update
-        worksheet.spreadsheet.batch_update({'requests': [r for r in requests if r]})
+        # Add timestamp
+        timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+        worksheet.update(range_name=f'A{len(data)+2}', values=timestamp)
+
+        # Execute all formatting in one batch
+        valid_requests = [r for r in format_requests if r]
+        if valid_requests:
+            worksheet.spreadsheet.batch_update({'requests': valid_requests})
+
         logging.info(f"{config.name} sheet updated successfully")
 
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
 
+def _get_or_create_worksheet(spreadsheet, sheet_name: str):
+    """Worksheet management with error handling."""
+    try:
+        return spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        return spreadsheet.add_worksheet(sheet_name, 100, 20)
+
+# Formatting functions --------------------------------------------------------
 def _create_data_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Precise border range calculation."""
     return {
@@ -249,14 +211,6 @@ def _create_data_borders(worksheet, row_count: int, col_count: int) -> dict:
         }
     }
 
-def _get_or_create_worksheet(spreadsheet, sheet_name: str):
-    """Worksheet management with error handling."""
-    try:
-        return spreadsheet.worksheet(sheet_name)
-    except gspread.exceptions.WorksheetNotFound:
-        return spreadsheet.add_worksheet(sheet_name, 100, 20)
-
-# Formatting functions --------------------------------------------------------
 def _create_header_format(worksheet) -> dict:
     return {
         'repeatCell': {

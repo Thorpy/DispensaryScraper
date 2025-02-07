@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Optimized web scraper with timeout fixes and Sheets optimizations."""
+"""Optimized scraper with formatting fixes and cloud-optimized Sheets updates."""
 
 import os
 import re
@@ -20,11 +20,14 @@ from google.oauth2.service_account import Credentials
 
 # Constants -------------------------------------------------------------------
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-REQUEST_TIMEOUT = 25  # Increased timeout
+REQUEST_TIMEOUT = 25
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
+ALTERNATING_ROW_COLOR = {'red': 0.98, 'green': 0.98, 'blue': 0.98}
+UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}
+AVAILABLE_COLOR = {'red': 0.9, 'green': 1, 'blue': 0.9}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # Configure logging
@@ -45,6 +48,7 @@ class DispensaryConfig:
     column_headers: List[str]
     column_widths: Dict[int, int]
     currency_columns: List[int] = None
+    availability_column: Optional[int] = None
     use_cloudscraper: bool = True
 
 class AvailabilityStatus(Enum):
@@ -78,7 +82,7 @@ def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
     return session
 
 def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float]]:
-    """Mamedica scraper with timeout handling."""
+    """Mamedica scraper with error handling."""
     client = create_http_client(use_cloudscraper)
     try:
         response = client.get(url, timeout=REQUEST_TIMEOUT)
@@ -105,11 +109,11 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
         return []
 
 def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
-    """Optimized Montu scraper."""
+    """Optimized Montu scraper with cloudflare bypass."""
     client = create_http_client(use_cloudscraper)
     try:
         start_time = time.monotonic()
-        response = client.get(f"{url}?limit=250", timeout=10)
+        response = client.get(f"{url}?limit=250", timeout=15)
         response.raise_for_status()
         data = response.json()
         
@@ -142,31 +146,33 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         return []
 
 def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Optimized Google Sheets update with timestamp fix."""
+    """Optimized Google Sheets update with full formatting."""
     try:
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Update data
+        # Clear and update data
         data = [config.column_headers] + [list(p) for p in products]
-        worksheet.batch_clear(["A1:Z"])  # Clear existing data
-        worksheet.update(values=data, range_name='A1')  # Fixed argument order
+        worksheet.batch_clear(["A:Z"])
+        worksheet.update(range_name='A1', values=data)
 
-        # Apply essential formatting
+        # Prepare all formatting requests
         format_requests = [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             _create_currency_formats(config, worksheet, len(products)),
-            _create_frozen_header(worksheet)
+            _create_row_color_rule(worksheet, len(products), len(config.column_headers)),
+            _create_availability_rules(config, worksheet, len(products)),
+            _create_frozen_header(worksheet),
+            _create_timestamp_format(worksheet, len(data) + 2)
         ]
-        
+
         # Add timestamp
         timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-        worksheet.update(values=timestamp, range_name=f'A{len(data)+2}')
-        format_requests.append(_create_timestamp_format(worksheet, len(data)+2))
+        worksheet.update(range_name=f'A{len(data)+2}', values=timestamp)
 
-        # Execute formatting requests
+        # Execute all formatting in one batch
         valid_requests = [r for r in format_requests if r]
         if valid_requests:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
@@ -239,6 +245,62 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
         }
     } for col in config.currency_columns]
 
+def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
+    return {
+        'addConditionalFormatRule': {
+            'rule': {
+                'ranges': [{
+                    'sheetId': worksheet.id,
+                    'startRowIndex': 1,
+                    'endRowIndex': row_count + 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': col_count
+                }],
+                'booleanRule': {
+                    'condition': {
+                        'type': 'CUSTOM_FORMULA',
+                        'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
+                    },
+                    'format': {'backgroundColor': ALTERNATING_ROW_COLOR}
+                }
+            }
+        }
+    }
+
+def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
+    if config.availability_column is None:
+        return []
+    
+    col = config.availability_column
+    range_def = {
+        'sheetId': worksheet.id,
+        'startRowIndex': 1,
+        'endRowIndex': row_count + 1,
+        'startColumnIndex': col,
+        'endColumnIndex': col + 1
+    }
+    
+    return [{
+        'addConditionalFormatRule': {
+            'rule': {
+                'ranges': [range_def],
+                'booleanRule': {
+                    'condition': {
+                        'type': 'TEXT_EQ',
+                        'values': [{'userEnteredValue': status.value}]
+                    },
+                    'format': {
+                        'backgroundColor': color,
+                        'textFormat': {'bold': True}
+                    }
+                }
+            }
+        }
+    } for status, color in [
+        (AvailabilityStatus.NOT_AVAILABLE, UNAVAILABLE_COLOR),
+        (AvailabilityStatus.AVAILABLE, AVAILABLE_COLOR)
+    ]]
+
 def _create_frozen_header(worksheet) -> dict:
     return {
         'updateSheetProperties': {
@@ -266,10 +328,11 @@ def _create_timestamp_format(worksheet, row: int) -> dict:
                         'italic': True,
                         'fontSize': 10,
                         'foregroundColor': TIMESTAMP_COLOR
-                    }
+                    },
+                    'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
                 }
             },
-            'fields': 'userEnteredFormat.textFormat'
+            'fields': 'userEnteredFormat(textFormat,backgroundColor)'
         }
     }
 
@@ -299,6 +362,7 @@ def main():
             column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
             column_widths={0: 220, 1: 100, 2: 80, 3: 80, 4: 120},
             currency_columns=[1],
+            availability_column=4,
             use_cloudscraper=True
         )
     ]

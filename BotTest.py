@@ -157,16 +157,16 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         worksheet.batch_clear(["A:Z"])
         worksheet.update(range_name='A1', values=data)
 
-        row_count = len(products)
+        row_count = len(products)  # Ensure this is defined
         
         # Prepare all formatting requests
         format_requests = [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
-            _create_currency_formats(config, worksheet, len(products)),
-            _create_row_color_rule(worksheet, len(products), len(config.column_headers)),
-            _create_availability_rules(config, worksheet, len(products)),
-            _create_data_borders(worksheet, row_count, col_count),
+            _create_currency_formats(config, worksheet, row_count),
+            _create_row_color_rule(worksheet, row_count, len(config.column_headers)),
+            _create_availability_rules(config, worksheet, row_count),
+            _create_data_borders(worksheet, row_count, len(config.column_headers)),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, len(data) + 2)
         ]

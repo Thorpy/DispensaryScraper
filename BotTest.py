@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 
+# ============================= CONFIGURATION ==============================
 @dataclass
 class DispensaryConfig:
     """Configuration for dispensary scraping and spreadsheet settings."""
@@ -32,14 +33,17 @@ class DispensaryConfig:
     availability_column: Optional[int] = None
     use_cloudscraper: bool = True
 
-# ============================= CONFIGURATION ==============================
+class AvailabilityStatus(Enum):
+    AVAILABLE = 'Available'
+    NOT_AVAILABLE = 'Not Available'
+
 DISPENSARIES = [
     DispensaryConfig(
         name="Mamedica",
         url="https://mamedica.co.uk/repeat-prescription/",
         spreadsheet_id=os.getenv('MAMEDICA_SHEET_ID', '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'),
         sheet_name="Mamedica List",
-        scrape_method=scrape_mamedica_products,
+        scrape_method=lambda url, _: scrape_mamedica_products(url),  # Will be defined later
         column_headers=['Product', 'Price'],
         column_widths={0: 380, 1: 100},
         currency_columns=[1],
@@ -50,7 +54,7 @@ DISPENSARIES = [
         url="https://store.montu.uk/products.json",
         spreadsheet_id=os.getenv('MONTU_SHEET_ID', '1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU'),
         sheet_name="Montu List",
-        scrape_method=scrape_montu_products,
+        scrape_method=lambda url, _: scrape_montu_products(url),  # Will be defined later
         column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
         column_widths={0: 280, 1: 100, 2: 80, 3: 80, 4: 120},
         currency_columns=[1],
@@ -70,11 +74,6 @@ AVAILABLE_COLOR = {'red': 0.9, 'green': 1, 'blue': 0.9}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
-
-class AvailabilityStatus(Enum):
-    AVAILABLE = 'Available'
-    NOT_AVAILABLE = 'Not Available'
-
 def load_google_credentials() -> Optional[Credentials]:
     """Load Google Sheets API credentials."""
     try:

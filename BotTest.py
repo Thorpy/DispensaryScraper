@@ -155,7 +155,7 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         # Clear and update data in one go
         data = [config.column_headers] + [list(p) for p in products]
         worksheet.batch_clear(["A:Z"])
-        worksheet.update('A1', data)  # Use bulk update
+        worksheet.update(data, 'A1')  # Use bulk update
 
         row_count = len(products)
         col_count = len(config.column_headers)

@@ -146,41 +146,81 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         return []
 
 def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Optimized Google Sheets update with full formatting."""
+    """Ultra-optimized Google Sheets update with precise formatting."""
     try:
         gc = gspread.authorize(credentials)
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Clear and update data
-        data = [config.column_headers] + [list(p) for p in products]
-        worksheet.batch_clear(["A:Z"])
-        worksheet.update(range_name='A1', values=data)
+        # Calculate dimensions
+        row_count = len(products)
+        col_count = len(config.column_headers)
+        data_range = f"A1:{gspread.utils.rowcol_to_a1(row_count + 1, col_count)}"  # +1 for header
 
-        # Prepare all formatting requests
-        format_requests = [
+        # Batch update data and formatting
+        requests = [
+            # Clear existing data and formatting
+            {
+                'updateCells': {
+                    'range': {'sheetId': worksheet.id, 'startRowIndex': 0},
+                    'fields': 'userEnteredFormat'
+                }
+            },
+            # Update data
+            {
+                'updateCells': {
+                    'range': {'sheetId': worksheet.id},
+                    'rows': [{'values': [{'userEnteredValue': cell} for cell in row]} 
+                            for row in [config.column_headers] + [list(p) for p in products]],
+                    'fields': 'userEnteredValue'
+                }
+            },
+            # Add timestamp
+            {
+                'updateCells': {
+                    'range': {'sheetId': worksheet.id, 'startRowIndex': row_count + 2},
+                    'rows': [{'values': [{'userEnteredValue': datetime.now().strftime("Updated: %H:%M %d/%m/%Y")}]}],
+                    'fields': 'userEnteredValue'
+                }
+            },
+            # Apply all formatting
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
-            _create_currency_formats(config, worksheet, len(products)),
-            _create_row_color_rule(worksheet, len(products), len(config.column_headers)),
-            _create_availability_rules(config, worksheet, len(products)),
+            _create_currency_formats(config, worksheet, row_count),
+            _create_row_color_rule(worksheet, row_count, col_count),
+            _create_availability_rules(config, worksheet, row_count),
+            _create_data_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, len(data) + 2)
+            _create_timestamp_format(worksheet, row_count + 2)
         ]
 
-        # Add timestamp
-        timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-        worksheet.update(range_name=f'A{len(data)+2}', values=timestamp)
+        # Execute single batch update
+        worksheet.spreadsheet.batch_update({'requests': [r for r in requests if r]})
 
-        # Execute all formatting in one batch
-        valid_requests = [r for r in format_requests if r]
-        if valid_requests:
-            worksheet.spreadsheet.batch_update({'requests': valid_requests})
-
-        logging.info(f"{config.name} sheet updated successfully")
+        logging.info(f"{config.name} sheet updated in single batch")
 
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
+
+def _create_data_borders(worksheet, row_count: int, col_count: int) -> dict:
+    """Precise border range calculation."""
+    return {
+        'updateBorders': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': row_count + 1,  # Header + data rows
+                'startColumnIndex': 0,
+                'endColumnIndex': col_count
+            },
+            'top': {'style': 'SOLID', 'width': 1},
+            'bottom': {'style': 'SOLID', 'width': 1},
+            'left': {'style': 'SOLID', 'width': 1},
+            'right': {'style': 'SOLID', 'width': 1},
+            'innerHorizontal': {'style': 'SOLID', 'width': 1},
+            'innerVertical': {'style': 'SOLID', 'width': 1}
+        }
+    }
 
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     """Worksheet management with error handling."""

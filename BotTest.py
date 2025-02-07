@@ -25,7 +25,6 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-ALTERNATING_ROW_COLOR = {'red': 0.98, 'green': 0.98, 'blue': 0.98}
 UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}
 AVAILABLE_COLOR = {'red': 0.9, 'green': 1, 'blue': 0.9}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
@@ -190,7 +189,6 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
-            _create_row_color_rule(worksheet, row_count, col_count),
             *_create_availability_rules(config, worksheet, row_count),
             _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
@@ -272,8 +270,12 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
         }
     } for col in config.currency_columns]
 
-def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
-    return {
+def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
+    if config.availability_column is None:
+        return []
+    
+    col_index = config.availability_column
+    return [{
         'addConditionalFormatRule': {
             'rule': {
                 'ranges': [{
@@ -281,55 +283,46 @@ def _create_row_color_rule(worksheet, row_count: int, col_count: int) -> dict:
                     'startRowIndex': 1,
                     'endRowIndex': row_count + 1,
                     'startColumnIndex': 0,
-                    'endColumnIndex': col_count
+                    'endColumnIndex': len(config.column_headers)
                 }],
                 'booleanRule': {
                     'condition': {
                         'type': 'CUSTOM_FORMULA',
-                        'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
-                    },
-                    'format': {'backgroundColor': ALTERNATING_ROW_COLOR}
-                }
-            }
-        }
-    }
-
-def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
-    if config.availability_column is None:
-        return []
-    
-    col = config.availability_column
-    range_def = {
-        'sheetId': worksheet.id,
-        'startRowIndex': 1,
-        'endRowIndex': row_count + 1,
-        'startColumnIndex': col,
-        'endColumnIndex': col + 1
-    }
-    
-    return [{
-        'addConditionalFormatRule': {
-            'rule': {
-                'ranges': [range_def],
-                'booleanRule': {
-                    'condition': {
-                        'type': 'TEXT_EQ',
-                        'values': [{'userEnteredValue': status.value}]
+                        'values': [{"userEnteredValue": f'=${chr(65+col_index)}2="Not Available"'}]
                     },
                     'format': {
-                        'backgroundColor': color,
-                        'textFormat': {'bold': True}
+                        'backgroundColor': UNAVAILABLE_COLOR,
+                        'textFormat': {'bold': True, 'foregroundColor': {'red': 0.4, 'green': 0, 'blue': 0}}
                     }
                 }
             }
         }
-    } for status, color in [
-        (AvailabilityStatus.NOT_AVAILABLE, UNAVAILABLE_COLOR),
-        (AvailabilityStatus.AVAILABLE, AVAILABLE_COLOR)
-    ]]
+    }, {
+        'addConditionalFormatRule': {
+            'rule': {
+                'ranges': [{
+                    'sheetId': worksheet.id,
+                    'startRowIndex': 1,
+                    'endRowIndex': row_count + 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': len(config.column_headers)
+                }],
+                'booleanRule': {
+                    'condition': {
+                        'type': 'CUSTOM_FORMULA',
+                        'values': [{"userEnteredValue": f'=${chr(65+col_index)}2="Available"'}]
+                    },
+                    'format': {
+                        'backgroundColor': AVAILABLE_COLOR,
+                        'textFormat': {'bold': True, 'foregroundColor': {'red': 0, 'green': 0.4, 'blue': 0}}
+                    }
+                }
+            }
+        }
+    }]
 
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
-    """Simplified border application (outer borders only, this saves 80 seconds!?)."""
+    """Simplified border application (outer borders only)."""
     return {
         'updateBorders': {
             'range': {
@@ -424,7 +417,7 @@ def main():
             sheet_name="Mamedica List",
             scrape_method=scrape_mamedica_products,
             column_headers=['Product', 'Price'],
-            column_widths={0: 400, 1: 100},
+            column_widths={0: 380, 1: 100},
             currency_columns=[1],
             use_cloudscraper=True
         ),
@@ -435,7 +428,7 @@ def main():
             sheet_name="Montu List",
             scrape_method=scrape_montu_products,
             column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
-            column_widths={0: 320, 1: 120, 2: 100, 3: 100, 4: 140},
+            column_widths={0: 280, 1: 100, 2: 80, 3: 80, 4: 120},
             currency_columns=[1],
             availability_column=4,
             use_cloudscraper=True

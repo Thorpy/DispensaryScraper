@@ -152,6 +152,25 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         spreadsheet = gc.open_by_key(config.spreadsheet_id)
         worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
+        # Fetch existing conditional format rules
+        spreadsheet_data = spreadsheet.fetch_sheet_metadata()
+        sheet_info = next(
+            (s for s in spreadsheet_data['sheets'] if s['properties']['sheetId'] == worksheet.id),
+            None
+        )
+        existing_rules = sheet_info.get('conditionalFormats', []) if sheet_info else []
+
+        # Generate delete requests for existing conditional format rules
+        delete_requests = [
+            {
+                "deleteConditionalFormatRule": {
+                    "sheetId": worksheet.id,
+                    "index": index
+                }
+            }
+            for index in reversed(range(len(existing_rules)))
+        ]
+
         # Clear and update data in one go
         data = [config.column_headers] + [list(p) for p in products]
         worksheet.batch_clear(["A:Z"])
@@ -160,13 +179,13 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         row_count = len(products)
         col_count = len(config.column_headers)
 
-        # Prepare all formatting requests
-        format_requests = [
+        # Prepare all formatting requests including deletion of old rules
+        format_requests = delete_requests + [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
-            _create_currency_formats(config, worksheet, row_count),
+            *_create_currency_formats(config, worksheet, row_count),
             _create_row_color_rule(worksheet, row_count, col_count),
-            _create_availability_rules(config, worksheet, row_count),
+            *_create_availability_rules(config, worksheet, row_count),
             _create_data_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, len(data) + 2)

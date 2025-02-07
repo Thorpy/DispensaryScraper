@@ -157,6 +157,8 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         worksheet.batch_clear(["A:Z"])
         worksheet.update(range_name='A1', values=data)
 
+        row_count = len(products)
+        
         # Prepare all formatting requests
         format_requests = [
             _create_header_format(worksheet),

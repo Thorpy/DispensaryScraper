@@ -200,8 +200,8 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
-            _create_zebra_stripes(worksheet, row_count, col_count),
-            *_create_availability_rules(config, worksheet, row_count),
+            _create_zebra_stripes(worksheet, row_count, col_count),  # Zebra first
+            *_create_availability_rules(config, worksheet, row_count),  # Availability second
             _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, timestamp_row),

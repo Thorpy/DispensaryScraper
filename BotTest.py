@@ -72,6 +72,7 @@ HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
 UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}
 AVAILABLE_COLOR = {'red': 0.9, 'green': 1, 'blue': 0.9}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
+ALTERNATING_ROW_COLOR = {'red': 0.98, 'green': 0.98, 'blue': 0.98}
 
 # ============================ CORE FUNCTIONALITY ==========================
 def load_google_credentials() -> Optional[Credentials]:
@@ -277,37 +278,62 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
     } for col in config.currency_columns]
 
 def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
-    """Create conditional formatting for availability."""
-    if not config.availability_column:
-        return []
+    rules = []
     
-    col_index = config.availability_column
-    return [{
-        'addConditionalFormatRule': {
-            'rule': {
-                'ranges': [{
-                    'sheetId': worksheet.id,
-                    'startRowIndex': 1,
-                    'endRowIndex': row_count + 1,
-                    'startColumnIndex': 0,
-                    'endColumnIndex': len(config.column_headers)
-                }],
-                'booleanRule': {
-                    'condition': {
-                        'type': 'CUSTOM_FORMULA',
-                        'values': [{"userEnteredValue": f'=${chr(65+col_index)}2="{status.value}"'}]
-                    },
-                    'format': {
-                        'backgroundColor': color,
-                        'textFormat': {'bold': True, 'foregroundColor': text_color}
+    # Zebra striping (added first so availability colors take precedence)
+    if config.availability_column is not None:
+        rules.append({
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [{
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 1,
+                        'endRowIndex': row_count + 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': len(config.column_headers)
+                    }],
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
+                        },
+                        'format': {'backgroundColor': ALTERNATING_ROW_COLOR}
                     }
                 }
             }
-        }
-    } for status, color, text_color in [
-        (AvailabilityStatus.NOT_AVAILABLE, UNAVAILABLE_COLOR, {'red': 0.4, 'green': 0, 'blue': 0}),
-        (AvailabilityStatus.AVAILABLE, AVAILABLE_COLOR, {'red': 0, 'green': 0.4, 'blue': 0})
-    ]]
+        })
+
+    # Availability highlighting
+    if config.availability_column is not None:
+        col_index = config.availability_column
+        rules.extend([{
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [{
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 1,
+                        'endRowIndex': row_count + 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': len(config.column_headers)
+                    }],
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{"userEnteredValue": f'=${chr(65+col_index)}2="{status.value}"'}]
+                        },
+                        'format': {
+                            'backgroundColor': color,
+                            'textFormat': {'bold': True, 'foregroundColor': text_color}
+                        }
+                    }
+                }
+            }
+        } for status, color, text_color in [
+            (AvailabilityStatus.NOT_AVAILABLE, UNAVAILABLE_COLOR, {'red': 0.4, 'green': 0, 'blue': 0}),
+            (AvailabilityStatus.AVAILABLE, AVAILABLE_COLOR, {'red': 0, 'green': 0.4, 'blue': 0})
+        ]])
+    
+    return rules
 
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Apply minimal border styling."""

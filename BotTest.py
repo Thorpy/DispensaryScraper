@@ -446,20 +446,25 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler()])
-if not (credentials := load_google_credentials()):
-    return
+        handlers=[logging.StreamHandler()]
+    )
 
-for dispensary in DISPENSARIES:
-    start_time = time.monotonic()
-    logging.info(f"Starting {dispensary.name}")
-    
-    try:
-        if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
-            update_start = time.monotonic()
-            update_google_sheet(credentials, dispensary, data)
-            logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
-    except Exception as e:
-        logging.error(f"Error processing {dispensary.name}: {str(e)}")
-    
-    logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
+    if not (credentials := load_google_credentials()):
+        return
+
+    for dispensary in DISPENSARIES:
+        start_time = time.monotonic()
+        logging.info(f"Starting {dispensary.name}")
+        
+        try:
+            if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
+                update_start = time.monotonic()
+                update_google_sheet(credentials, dispensary, data)
+                logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
+        except Exception as e:
+            logging.error(f"Error processing {dispensary.name}: {str(e)}")
+        
+        logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
+
+if __name__ == "__main__":
+    main()

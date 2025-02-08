@@ -69,9 +69,10 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-ALTERNATING_ROW_COLOR = {'red': 0.92, 'green': 0.92, 'blue': 0.92}  # More visible gray
-AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}         # Darker green
-UNAVAILABLE_COLOR = {'red': 1, 'green': 0.85, 'blue': 0.85}        # Softer red
+ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}  # More visible light gray
+STRIPE_TEXT_COLOR = {'red': 0.2, 'green': 0.2, 'blue': 0.2}        # Darker text for contrast
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}         # Dark green
+UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}          # Soft red
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
@@ -281,8 +282,9 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
         }
     } for col in config.currency_columns]
 
+
 def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
-    """Create alternating row colors."""
+    """Create alternating row colors with better visibility."""
     return {
         'addConditionalFormatRule': {
             'rule': {
@@ -299,14 +301,15 @@ def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
                         'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
                     },
                     'format': {
-                        'backgroundColor': ALTERNATING_ROW_COLOR
+                        'backgroundColor': ALTERNATING_ROW_COLOR,
+                        'textFormat': {'foregroundColor': STRIPE_TEXT_COLOR}
                     }
                 }
             }
         }
     }
 
-
+# Updated availability rules to preserve stripes
 def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
     """Create conditional formatting that works with zebra stripes."""
     if config.availability_column is None:
@@ -340,7 +343,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                 }
             }
         },
-        # Available items - text color only
+        # Available items - text color only (preserves zebra background)
         {
             'addConditionalFormatRule': {
                 'rule': {

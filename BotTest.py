@@ -69,9 +69,9 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-ALTERNATING_ROW_COLOR = {'red': 0.95, 'green': 0.95, 'blue': 0.95}
-UNAVAILABLE_COLOR = {'red': 1, 'green': 0.8, 'blue': 0.8}
-AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.5, 'blue': 0}
+ALTERNATING_ROW_COLOR = {'red': 0.92, 'green': 0.92, 'blue': 0.92}  # More visible gray
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}         # Darker green
+UNAVAILABLE_COLOR = {'red': 1, 'green': 0.85, 'blue': 0.85}        # Softer red
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
@@ -306,8 +306,9 @@ def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
         }
     }
 
+
 def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
-    """Create conditional formatting for availability."""
+    """Create conditional formatting that works with zebra stripes."""
     if config.availability_column is None:
         return []
     
@@ -315,7 +316,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
     col_letter = chr(65 + col_index)
     
     return [
-        # Unavailable items - full row highlighting
+        # Unavailable items - full row highlight
         {
             'addConditionalFormatRule': {
                 'rule': {
@@ -333,13 +334,13 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                         },
                         'format': {
                             'backgroundColor': UNAVAILABLE_COLOR,
-                            'textFormat': {'bold': True, 'foregroundColor': {'red': 0.4, 'green': 0, 'blue': 0}}
+                            'textFormat': {'bold': True, 'foregroundColor': {'red': 0.6, 'green': 0, 'blue': 0}}
                         }
                     }
                 }
             }
         },
-        # Available items - text coloring
+        # Available items - text color only
         {
             'addConditionalFormatRule': {
                 'rule': {
@@ -363,7 +364,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
             }
         }
     ]
-
+    
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Apply minimal border styling."""
     return {

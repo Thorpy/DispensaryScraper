@@ -69,9 +69,9 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-ALTERNATING_ROW_COLOR = {'red': 0.98, 'green': 0.98, 'blue': 0.98}
-UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}
-AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}
+ALTERNATING_ROW_COLOR = {'red': 0.95, 'green': 0.95, 'blue': 0.95}
+UNAVAILABLE_COLOR = {'red': 1, 'green': 0.8, 'blue': 0.8}
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.5, 'blue': 0}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
@@ -195,13 +195,13 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         row_count = len(products)
         col_count = len(config.column_headers)
 
-        # Prepare formatting requests
+        # Prepare formatting requests (order matters!)
         format_requests = delete_requests + [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
-            *_create_availability_rules(config, worksheet, row_count),
             _create_zebra_stripes(worksheet, row_count, col_count),
+            *_create_availability_rules(config, worksheet, row_count),
             _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, timestamp_row),
@@ -298,7 +298,9 @@ def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
                         'type': 'CUSTOM_FORMULA',
                         'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
                     },
-                    'format': {'backgroundColor': ALTERNATING_ROW_COLOR}
+                    'format': {
+                        'backgroundColor': ALTERNATING_ROW_COLOR
+                    }
                 }
             }
         }
@@ -311,34 +313,56 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
     
     col_index = config.availability_column
     col_letter = chr(65 + col_index)
-    return [{
-        'addConditionalFormatRule': {
-            'rule': {
-                'ranges': [{
-                    'sheetId': worksheet.id,
-                    'startRowIndex': 1,
-                    'endRowIndex': row_count + 1,
-                    'startColumnIndex': 0,
-                    'endColumnIndex': len(config.column_headers)
-                }],
-                'booleanRule': {
-                    'condition': {
-                        'type': 'CUSTOM_FORMULA',
-                        'values': [{"userEnteredValue": f'=${col_letter}2="{status.value}"'}]
-                    },
-                    'format': format_dict
+    
+    return [
+        # Unavailable items - full row highlighting
+        {
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [{
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 1,
+                        'endRowIndex': row_count + 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': len(config.column_headers)
+                    }],
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{"userEnteredValue": f'=${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}"'}]
+                        },
+                        'format': {
+                            'backgroundColor': UNAVAILABLE_COLOR,
+                            'textFormat': {'bold': True, 'foregroundColor': {'red': 0.4, 'green': 0, 'blue': 0}}
+                        }
+                    }
+                }
+            }
+        },
+        # Available items - text coloring
+        {
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [{
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 1,
+                        'endRowIndex': row_count + 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': len(config.column_headers)
+                    }],
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{"userEnteredValue": f'=${col_letter}2="{AvailabilityStatus.AVAILABLE.value}"'}]
+                        },
+                        'format': {
+                            'textFormat': {'bold': True, 'foregroundColor': AVAILABLE_TEXT_COLOR}
+                        }
+                    }
                 }
             }
         }
-    } for status, format_dict in [
-        (AvailabilityStatus.NOT_AVAILABLE, {
-            'backgroundColor': UNAVAILABLE_COLOR,
-            'textFormat': {'bold': True, 'foregroundColor': {'red': 0.4, 'green': 0, 'blue': 0}}
-        }),
-        (AvailabilityStatus.AVAILABLE, {
-            'textFormat': {'bold': True, 'foregroundColor': AVAILABLE_TEXT_COLOR}
-        })
-    ]]
+    ]
 
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Apply minimal border styling."""

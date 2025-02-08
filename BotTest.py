@@ -446,9 +446,8 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler()]
-    )
-    if not (credentials := load_google_credentials()):
+        handlers=[logging.StreamHandler()])
+if not (credentials := load_google_credentials()):
     return
 
 for dispensary in DISPENSARIES:

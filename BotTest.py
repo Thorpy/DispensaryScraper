@@ -200,8 +200,8 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
-            _create_zebra_stripe_rule(worksheet, row_count, col_count),
             *_create_availability_rules(config, worksheet, row_count),
+            _create_zebra_stripes(worksheet, row_count, col_count),
             _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, timestamp_row),
@@ -281,7 +281,7 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
         }
     } for col in config.currency_columns]
 
-def _create_zebra_stripe_rule(worksheet, row_count: int, col_count: int) -> dict:
+def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
     """Create alternating row colors."""
     return {
         'addConditionalFormatRule': {
@@ -310,6 +310,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
         return []
     
     col_index = config.availability_column
+    col_letter = chr(65 + col_index)
     return [{
         'addConditionalFormatRule': {
             'rule': {
@@ -323,37 +324,21 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                 'booleanRule': {
                     'condition': {
                         'type': 'CUSTOM_FORMULA',
-                        'values': [{"userEnteredValue": f'=${chr(65+col_index)}2="{AvailabilityStatus.NOT_AVAILABLE.value}"'}]
+                        'values': [{"userEnteredValue": f'=${col_letter}2="{status.value}"'}]
                     },
-                    'format': {
-                        'backgroundColor': UNAVAILABLE_COLOR,
-                        'textFormat': {'bold': True, 'foregroundColor': {'red': 0.4, 'green': 0, 'blue': 0}}
-                    }
+                    'format': format_dict
                 }
             }
         }
-    }, {
-        'addConditionalFormatRule': {
-            'rule': {
-                'ranges': [{
-                    'sheetId': worksheet.id,
-                    'startRowIndex': 1,
-                    'endRowIndex': row_count + 1,
-                    'startColumnIndex': 0,
-                    'endColumnIndex': len(config.column_headers)
-                }],
-                'booleanRule': {
-                    'condition': {
-                        'type': 'CUSTOM_FORMULA',
-                        'values': [{"userEnteredValue": f'=${chr(65+col_index)}2="{AvailabilityStatus.AVAILABLE.value}"'}]
-                    },
-                    'format': {
-                        'textFormat': {'bold': True, 'foregroundColor': AVAILABLE_TEXT_COLOR}
-                    }
-                }
-            }
-        }
-    }]
+    } for status, format_dict in [
+        (AvailabilityStatus.NOT_AVAILABLE, {
+            'backgroundColor': UNAVAILABLE_COLOR,
+            'textFormat': {'bold': True, 'foregroundColor': {'red': 0.4, 'green': 0, 'blue': 0}}
+        }),
+        (AvailabilityStatus.AVAILABLE, {
+            'textFormat': {'bold': True, 'foregroundColor': AVAILABLE_TEXT_COLOR}
+        })
+    ]]
 
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Apply minimal border styling."""
@@ -446,10 +431,10 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler()])
+        handlers=[logging.StreamHandler()]
+    )
 
-    if not (credentials :=
-    load_google_credentials()):
+    if not (credentials := load_google_credentials()):
         return
 
     for dispensary in DISPENSARIES:

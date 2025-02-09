@@ -184,7 +184,7 @@ def update_google_sheet(config, worksheet, products):
 
         # Build formatting requests
         format_requests = [
-            _create_header_format(worksheet),  # This line targets just the header row
+            _create_header_format(config, worksheet),  # Pass config here
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, len(products)),
             _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
@@ -204,7 +204,6 @@ def update_google_sheet(config, worksheet, products):
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
 
-
 # ============================ HELPER FUNCTIONS ============================
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     """Manage worksheet creation/retrieval."""
@@ -213,17 +212,11 @@ def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     except gspread.exceptions.WorksheetNotFound:
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
-def _create_header_format(worksheet, config) -> dict:
+def _create_header_format(config, worksheet) -> dict:
     """Create header row formatting."""
     return {
         'repeatCell': {
-            'range': {
-                'sheetId': worksheet.id,
-                'startRowIndex': 0,
-                'endRowIndex': 1,
-                'startColumnIndex': 0,
-                'endColumnIndex': len(config.column_headers)
-            },
+            'range': {'sheetId': worksheet.id, 'startRowIndex': 0, 'endRowIndex': 1},
             'cell': {
                 'userEnteredFormat': {
                     'backgroundColor': HEADER_BG_COLOR,
@@ -239,7 +232,6 @@ def _create_header_format(worksheet, config) -> dict:
             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
         }
     }
-
 
 def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
     """Set column widths."""

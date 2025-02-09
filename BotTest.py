@@ -331,6 +331,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'ranges': common_range,
                     'booleanRule': {
                         'condition': {
+                            'type': 'CUSTOM_FORMULA',
                             'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISODD(ROW()))'}]
                         },
                         'format': {
@@ -351,6 +352,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'ranges': common_range,
                     'booleanRule': {
                         'condition': {
+                            'type': 'CUSTOM_FORMULA',
                             'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISEVEN(ROW()))'}]
                         },
                         'format': {
@@ -367,6 +369,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'ranges': common_range,
                     'booleanRule': {
                         'condition': {
+                            'type': 'CUSTOM_FORMULA',
                             'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISODD(ROW()))'}]
                         },
                         'format': {

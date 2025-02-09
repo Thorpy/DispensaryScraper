@@ -213,25 +213,38 @@ def _get_or_create_worksheet(spreadsheet, sheet_name: str):
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
 def _create_header_format(config, worksheet) -> dict:
-    """Create header row formatting."""
-    return {
-        'repeatCell': {
-            'range': {'sheetId': worksheet.id, 'startRowIndex': 0, 'endRowIndex': 1},
-            'cell': {
-                'userEnteredFormat': {
-                    'backgroundColor': HEADER_BG_COLOR,
-                    'textFormat': {
-                        'foregroundColor': WHITE_TEXT,
-                        'bold': True,
-                        'fontSize': 12
+    """Create header row formatting for used columns only."""
+    requests = []
+
+    # Only format columns that are used
+    for index, header in enumerate(config.column_headers):
+        if header:  # Only format if header is not empty
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': 1,
+                        'startColumnIndex': index,
+                        'endColumnIndex': index + 1
                     },
-                    'horizontalAlignment': 'CENTER',
-                    'wrapStrategy': 'WRAP'
+                    'cell': {
+                        'userEnteredFormat': {
+                            'backgroundColor': HEADER_BG_COLOR,  # Apply color if needed
+                            'textFormat': {
+                                'foregroundColor': WHITE_TEXT,
+                                'bold': True,
+                                'fontSize': 12
+                            },
+                            'horizontalAlignment': 'CENTER',
+                                'wrapStrategy': 'WRAP'
+                        }
+                    },
+                    'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
                 }
-            },
-            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
-        }
-    }
+            })
+
+    return requests
 
 def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
     """Set column widths."""

@@ -172,10 +172,11 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         logging.error("Montu error: %s", error)
         return []
 
-def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp_row):
+def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp_row, products):
     try:
         col_count = len(config.column_headers)
-         # Prepare data with headers, products, and timestamp
+        
+        # Prepare data with headers, products, and timestamp
         data = [config.column_headers] + [list(p) for p in products]
         timestamp_row = len(data) + 2  # 2 empty rows after data
         data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
@@ -527,18 +528,18 @@ def main():
         
         try:
             # Scrape data from the dispensary
-            if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
+            if products := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
                 # Open the spreadsheet and get (or create) the worksheet
                 spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
                 worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
                 
                 # Define row_count as the number of data rows and timestamp_row as the row after data
-                row_count = len(data)
-                timestamp_row = row_count + 1
+                row_count = len(products)
+                timestamp_row = row_count + 3  # 1 header row + data rows + 2 empty rows + timestamp row
 
                 update_start = time.monotonic()
-                # Call update_google_sheet with all required parameters.
-                update_google_sheet(dispensary, worksheet, [], row_count, timestamp_row)
+                # Call update_google_sheet with all required parameters, including products
+                update_google_sheet(dispensary, worksheet, [], row_count, timestamp_row, products)
                 logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
         except Exception as e:
             logging.error(f"Error processing {dispensary.name}: {str(e)}")

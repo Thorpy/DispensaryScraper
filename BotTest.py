@@ -478,14 +478,26 @@ def main():
     if not (credentials := load_google_credentials()):
         return
 
+    # Authorize and create a gspread client
+    client = gspread.authorize(credentials)
+
     for dispensary in DISPENSARIES:
         start_time = time.monotonic()
         logging.info(f"Starting {dispensary.name}")
         
         try:
             if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
+                # Open the spreadsheet and get (or create) the worksheet
+                spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
+                worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
+                
+                # Define row_count as the number of data rows and timestamp_row as the row after data
+                row_count = len(data)
+                timestamp_row = row_count + 1
+
                 update_start = time.monotonic()
-                update_google_sheet(credentials, dispensary, data)
+                # Pass an empty list for delete_requests if not used
+                update_google_sheet(dispensary, worksheet, [], row_count, timestamp_row)
                 logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
         except Exception as e:
             logging.error(f"Error processing {dispensary.name}: {str(e)}")

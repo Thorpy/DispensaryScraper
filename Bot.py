@@ -436,6 +436,21 @@ def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) 
         }
     } for col, (alignment, wrap_strategy) in alignments.items()]
 
+def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
+    """Set column widths from configuration."""
+    return [{
+        'updateDimensionProperties': {
+            'range': {
+                'sheetId': worksheet.id,
+                'dimension': 'COLUMNS',
+                'startIndex': col,
+                'endIndex': col + 1
+            },
+            'properties': {'pixelSize': width},
+            'fields': 'pixelSize'
+        }
+    } for col, width in config.column_widths.items()]
+
 def _create_timestamp_format(worksheet, row: int) -> dict:
     """Format timestamp row."""
     return {

@@ -65,8 +65,8 @@ DISPENSARIES = [
         column_widths={0: 380, 1: 60},
         currency_columns=[1],
         header_color={'red': 0.12, 'green': 0.24, 'blue': 0.35},
-        even_stripe={'red': 0.85, 'green': 0.95, 'blue': 0.85},
-        odd_stripe={'red': 0.7, 'green': 0.9, 'blue': 0.7}
+        even_stripe={'red': 0.9, 'green': 0.9, 'blue': 0.9},
+        odd_stripe={'red': 1, 'green': 1, 'blue': 1}
     ),
     DispensaryConfig(
         name="Montu",

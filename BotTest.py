@@ -74,10 +74,10 @@ LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}  # Light green
 DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}      # Medium green
 LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}         # Light red
 DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}          # Medium red
-ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}  # Light grey
-AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}          # Dark green text
-UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}        # Dark red text
-WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}                      # White text
+ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}  # Default light grey
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}          # For odd available rows
+UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}        # For odd unavailable rows
+WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}                      # Fallback white text
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
@@ -175,13 +175,13 @@ def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp
     try:
         col_count = len(config.column_headers)
 
-        # update_google_sheet() to pass config to zebra stripes:
+        # Build the list of format requests
         format_requests = delete_requests + [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
-            _create_zebra_stripes(config, worksheet, row_count, col_count),  # Now takes config
-            *_create_availability_rules(config, worksheet, row_count),
+            _create_zebra_stripes(config, worksheet, row_count, col_count),  # Applies if no availability column
+            *_create_availability_rules(config, worksheet, row_count),      # Applies if availability column exists
             _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, timestamp_row),
@@ -262,10 +262,18 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
     } for col in config.currency_columns]
 
 def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> dict:
-    """Create alternating row colors for dispensaries without availability column."""
+    """Create alternating row colors for dispensaries without an availability column."""
     if config.availability_column is not None:
         return None  # Handled by availability rules
-    
+
+    # For Mamedica, use a more noticeable grey difference
+    if config.name == "Mamedica":
+        zebra_color = {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+        text_color = {'red': 0.15, 'green': 0.15, 'blue': 0.15}
+    else:
+        zebra_color = ALTERNATING_ROW_COLOR
+        text_color = {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+
     return {
         'addConditionalFormatRule': {
             'rule': {
@@ -282,8 +290,8 @@ def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> 
                         'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
                     },
                     'format': {
-                        'backgroundColor': ALTERNATING_ROW_COLOR,
-                        'textFormat': {'foregroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
+                        'backgroundColor': zebra_color,
+                        'textFormat': {'foregroundColor': text_color}
                     }
                 }
             }
@@ -306,9 +314,17 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
         'endColumnIndex': len(config.column_headers)
     }]
 
+    # For Montu, use custom text colors for even rows; otherwise, fall back to white.
+    if config.name == "Montu":
+        available_even_text = {'red': 0.0, 'green': 0.5, 'blue': 0.0}  # a distinct green
+        unavailable_even_text = {'red': 0.8, 'green': 0.0, 'blue': 0.0}  # a distinct red
+    else:
+        available_even_text = WHITE_TEXT
+        unavailable_even_text = WHITE_TEXT
+
     # Available rows - alternating green shades
     rules.extend([
-        {  # Even rows - darker green
+        {  # Even rows - darker green with custom even-row text color
             'addConditionalFormatRule': {
                 'rule': {
                     'ranges': common_range,
@@ -321,13 +337,13 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                         },
                         'format': {
                             'backgroundColor': DARK_GREEN,
-                            'textFormat': {'foregroundColor': WHITE_TEXT, 'bold': True}
+                            'textFormat': {'foregroundColor': available_even_text, 'bold': True}
                         }
                     }
                 }
             }
         },
-        {  # Odd rows - lighter green
+        {  # Odd rows - lighter green with default available text color
             'addConditionalFormatRule': {
                 'rule': {
                     'ranges': common_range,
@@ -350,7 +366,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
 
     # Unavailable rows - alternating red shades
     rules.extend([
-        {  # Even rows - darker red
+        {  # Even rows - darker red with custom even-row text color
             'addConditionalFormatRule': {
                 'rule': {
                     'ranges': common_range,
@@ -363,13 +379,13 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                         },
                         'format': {
                             'backgroundColor': DARK_RED,
-                            'textFormat': {'foregroundColor': WHITE_TEXT, 'bold': True}
+                            'textFormat': {'foregroundColor': unavailable_even_text, 'bold': True}
                         }
                     }
                 }
             }
         },
-        {  # Odd rows - lighter red
+        {  # Odd rows - lighter red with default unavailable text color
             'addConditionalFormatRule': {
                 'rule': {
                     'ranges': common_range,

@@ -451,6 +451,29 @@ def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
         }
     } for col, width in config.column_widths.items()]
 
+def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
+    """Apply currency formatting to specified columns."""
+    return [{
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 1,  # Skip header row
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': col,
+                'endColumnIndex': col + 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'numberFormat': {
+                        'type': 'CURRENCY',
+                        'pattern': '£#,##0.00'
+                    }
+                }
+            },
+            'fields': 'userEnteredFormat.numberFormat'
+        }
+    } for col in config.currency_columns]
+
 def _create_timestamp_format(worksheet, row: int) -> dict:
     """Format timestamp row."""
     return {

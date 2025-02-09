@@ -69,13 +69,11 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-WHITE = {'red': 1, 'green': 1, 'blue': 1}
 LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}
 DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}
 LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}
 DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}
 ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}
-# Default text colors (used when not Montu)
 AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}
 UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}
 WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}
@@ -172,10 +170,9 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         logging.error("Montu error: %s", error)
         return []
 
-def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp_row, products):
+def update_google_sheet(config, worksheet, products):
+    """Update Google Sheet with data and formatting."""
     try:
-        col_count = len(config.column_headers)
-        
         # Prepare data with headers, products, and timestamp
         data = [config.column_headers] + [list(p) for p in products]
         timestamp_row = len(data) + 2  # 2 empty rows after data
@@ -185,20 +182,20 @@ def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
 
-        # Build the list of format requests
-        format_requests = delete_requests + [
+        # Build formatting requests
+        format_requests = [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
-            *_create_currency_formats(config, worksheet, row_count),
-            _create_zebra_stripes(config, worksheet, row_count, col_count),
-            *_create_availability_rules(config, worksheet, row_count),
-            _create_optimized_borders(worksheet, row_count, col_count),
+            *_create_currency_formats(config, worksheet, len(products)),
+            _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
+            *_create_availability_rules(config, worksheet, len(products)),
+            _create_optimized_borders(worksheet, len(products), len(config.column_headers)),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, timestamp_row),
-            *_create_text_alignment(worksheet, row_count, config)
+            *_create_text_alignment(worksheet, len(products), config)
         ]
 
-        # Execute batch update
+        # Execute batch update with valid requests
         if valid_requests := [r for r in format_requests if r]:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
@@ -224,7 +221,7 @@ def _create_header_format(worksheet) -> dict:
                 'userEnteredFormat': {
                     'backgroundColor': HEADER_BG_COLOR,
                     'textFormat': {
-                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                        'foregroundColor': WHITE_TEXT,
                         'bold': True,
                         'fontSize': 12
                     },
@@ -519,7 +516,6 @@ def main():
     if not (credentials := load_google_credentials()):
         return
 
-    # Authorize and create a gspread client
     client = gspread.authorize(credentials)
 
     for dispensary in DISPENSARIES:
@@ -527,20 +523,11 @@ def main():
         logging.info(f"Starting {dispensary.name}")
         
         try:
-            # Scrape data from the dispensary
             if products := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
-                # Open the spreadsheet and get (or create) the worksheet
                 spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
                 worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
+                update_google_sheet(dispensary, worksheet, products)
                 
-                # Define row_count as the number of data rows and timestamp_row as the row after data
-                row_count = len(products)
-                timestamp_row = row_count + 3  # 1 header row + data rows + 2 empty rows + timestamp row
-
-                update_start = time.monotonic()
-                # Call update_google_sheet with all required parameters, including products
-                update_google_sheet(dispensary, worksheet, [], row_count, timestamp_row, products)
-                logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
         except Exception as e:
             logging.error(f"Error processing {dispensary.name}: {str(e)}")
         

@@ -1,0 +1,6 @@
+beautifulsoup4
+cloudscraper
+gspread
+google-auth
+requests
+urllib3

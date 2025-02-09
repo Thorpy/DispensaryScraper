@@ -315,7 +315,9 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'booleanRule': {
                         'condition': {
                             'type': 'CUSTOM_FORMULA',
-                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISEVEN(ROW()))'}]
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISEVEN(ROW()))'
+                            }]
                         },
                         'format': {
                             'backgroundColor': DARK_GREEN,
@@ -332,7 +334,9 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'booleanRule': {
                         'condition': {
                             'type': 'CUSTOM_FORMULA',
-                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISODD(ROW()))'}]
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISODD(ROW()))'
+                            }]
                         },
                         'format': {
                             'backgroundColor': LIGHT_GREEN,
@@ -353,7 +357,9 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'booleanRule': {
                         'condition': {
                             'type': 'CUSTOM_FORMULA',
-                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISEVEN(ROW()))'}]
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISEVEN(ROW()))'
+                            }]
                         },
                         'format': {
                             'backgroundColor': DARK_RED,
@@ -370,7 +376,9 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'booleanRule': {
                         'condition': {
                             'type': 'CUSTOM_FORMULA',
-                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISODD(ROW()))'}]
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISODD(ROW()))'
+                            }]
                         },
                         'format': {
                             'backgroundColor': LIGHT_RED,

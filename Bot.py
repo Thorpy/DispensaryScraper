@@ -80,15 +80,14 @@ WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
-def load_google_credentials() -> Optional[Credentials]:
-    """Load Google Sheets API credentials."""
+def load_google_client():
+    """Load authorized gspread client using service account credentials."""
     try:
-        return Credentials.from_service_account_file(
-            os.path.join(os.path.dirname(__file__), 'credentials.json'),
-            scopes=GOOGLE_SCOPES
+        return gspread.service_account(
+            filename=os.path.join(os.path.dirname(__file__), 'credentials.json')
         )
     except Exception as error:
-        logging.error("Failed to load credentials: %s", error)
+        logging.error("Failed to authenticate: %s", error)
         return None
 
 def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
@@ -512,25 +511,29 @@ def main():
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler()]
     )
-
-    if not (credentials := load_google_credentials()):
+    
+    # Authorize using service account directly
+    gc = load_google_client()
+    if not gc:
         return
-
-    client = gspread.authorize(credentials)
 
     for dispensary in DISPENSARIES:
         start_time = time.monotonic()
         logging.info(f"Starting {dispensary.name}")
-
+        
         try:
-            if products := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
-                spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
+            products = dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper)
+            if products:
+                spreadsheet = gc.open_by_key(dispensary.spreadsheet_id)
                 worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
-                update_google_sheet(dispensary, worksheet, products)
-
+                row_count = len(products)
+                timestamp_row = row_count + 3  # header + data rows + 2 empty rows
+                update_start = time.monotonic()
+                update_google_sheet(dispensary, worksheet, [], row_count, timestamp_row, products)
+                logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
         except Exception as e:
             logging.error(f"Error processing {dispensary.name}: {str(e)}")
-
+        
         logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
 
 if __name__ == "__main__":

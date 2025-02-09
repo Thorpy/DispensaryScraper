@@ -69,10 +69,15 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Formatting constants
 HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}  # More visible light gray
-STRIPE_TEXT_COLOR = {'red': 0.2, 'green': 0.2, 'blue': 0.2}        # Darker text for contrast
-AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}         # Dark green
-UNAVAILABLE_COLOR = {'red': 1, 'green': 0.9, 'blue': 0.9}          # Soft red
+WHITE = {'red': 1, 'green': 1, 'blue': 1}
+LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}  # Light green
+DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}      # Medium green
+LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}         # Light red
+DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}          # Medium red
+ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}  # Light grey
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}          # Dark green text
+UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}        # Dark red text
+WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}                      # White text
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
@@ -166,43 +171,17 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         logging.error("Montu error: %s", error)
         return []
 
-def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
-    """Update Google Sheet with scraped data and formatting."""
+def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp_row):
     try:
-        gc = gspread.authorize(credentials)
-        spreadsheet = gc.open_by_key(config.spreadsheet_id)
-        worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
-
-        # Clear existing formatting rules
-        spreadsheet_data = spreadsheet.fetch_sheet_metadata()
-        sheet_info = next(
-            (s for s in spreadsheet_data['sheets'] if s['properties']['sheetId'] == worksheet.id),
-            None
-        )
-        existing_rules = sheet_info.get('conditionalFormats', []) if sheet_info else []
-        delete_requests = [
-            {"deleteConditionalFormatRule": {"sheetId": worksheet.id, "index": index}}
-            for index in reversed(range(len(existing_rules)))
-        ]
-
-        # Prepare data with timestamp
-        data = [config.column_headers] + [list(p) for p in products]
-        timestamp_row = len(data) + 2
-        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-
-        worksheet.batch_clear(["A:Z"])
-        worksheet.update(data, 'A1')
-
-        row_count = len(products)
         col_count = len(config.column_headers)
 
-        # Prepare formatting requests (order matters!)
+        # update_google_sheet() to pass config to zebra stripes:
         format_requests = delete_requests + [
             _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, row_count),
-            _create_zebra_stripes(worksheet, row_count, col_count),  # Zebra first
-            *_create_availability_rules(config, worksheet, row_count),  # Availability second
+            _create_zebra_stripes(config, worksheet, row_count, col_count),  # Now takes config
+            *_create_availability_rules(config, worksheet, row_count),
             _create_optimized_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
             _create_timestamp_format(worksheet, timestamp_row),
@@ -283,8 +262,11 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
     } for col in config.currency_columns]
 
 
-def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
-    """Create alternating row colors with better visibility."""
+def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> dict:
+    """Create alternating row colors for dispensaries without availability column."""
+    if config.availability_column is not None:
+        return None  # Handled by availability rules
+    
     return {
         'addConditionalFormatRule': {
             'rule': {
@@ -302,25 +284,25 @@ def _create_zebra_stripes(worksheet, row_count: int, col_count: int) -> dict:
                     },
                     'format': {
                         'backgroundColor': ALTERNATING_ROW_COLOR,
-                        'textFormat': {'foregroundColor': STRIPE_TEXT_COLOR}
+                        'textFormat': {'foregroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
                     }
                 }
             }
         }
     }
 
-# Updated availability rules to preserve stripes
 def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
-    """Create conditional formatting that works with zebra stripes."""
+    """Create advanced availability formatting with alternating shades."""
     if config.availability_column is None:
         return []
     
     col_index = config.availability_column
     col_letter = chr(65 + col_index)
-    
-    return [
-        # Unavailable items - full row highlight
-        {
+    rules = []
+
+    # Available rows - alternating green shades
+    rules.extend([
+        {  # Even rows - darker green
             'addConditionalFormatRule': {
                 'rule': {
                     'ranges': [{
@@ -333,40 +315,71 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
                     'booleanRule': {
                         'condition': {
                             'type': 'CUSTOM_FORMULA',
-                            'values': [{"userEnteredValue": f'=${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}"'}]
+                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISEVEN(ROW()))'}]
                         },
                         'format': {
-                            'backgroundColor': UNAVAILABLE_COLOR,
-                            'textFormat': {'bold': True, 'foregroundColor': {'red': 0.6, 'green': 0, 'blue': 0}}
+                            'backgroundColor': DARK_GREEN,
+                            'textFormat': {'foregroundColor': WHITE_TEXT, 'bold': True}
                         }
                     }
                 }
             }
         },
-        # Available items - text color only (preserves zebra background)
-        {
+        {  # Odd rows - lighter green
             'addConditionalFormatRule': {
                 'rule': {
-                    'ranges': [{
-                        'sheetId': worksheet.id,
-                        'startRowIndex': 1,
-                        'endRowIndex': row_count + 1,
-                        'startColumnIndex': 0,
-                        'endColumnIndex': len(config.column_headers)
-                    }],
+                    'ranges': [same as above],
                     'booleanRule': {
                         'condition': {
-                            'type': 'CUSTOM_FORMULA',
-                            'values': [{"userEnteredValue": f'=${col_letter}2="{AvailabilityStatus.AVAILABLE.value}"'}]
+                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISODD(ROW()))'}]
                         },
                         'format': {
-                            'textFormat': {'bold': True, 'foregroundColor': AVAILABLE_TEXT_COLOR}
+                            'backgroundColor': LIGHT_GREEN,
+                            'textFormat': {'foregroundColor': AVAILABLE_TEXT_COLOR, 'bold': True}
                         }
                     }
                 }
             }
         }
-    ]
+    ])
+
+    # Unavailable rows - alternating red shades
+    rules.extend([
+        {  # Even rows - darker red
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [same as above],
+                    'booleanRule': {
+                        'condition': {
+                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISEVEN(ROW()))'}]
+                        },
+                        'format': {
+                            'backgroundColor': DARK_RED,
+                            'textFormat': {'foregroundColor': WHITE_TEXT, 'bold': True}
+                        }
+                    }
+                }
+            }
+        },
+        {  # Odd rows - lighter red
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': [same as above],
+                    'booleanRule': {
+                        'condition': {
+                            'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISODD(ROW()))'}]
+                        },
+                        'format': {
+                            'backgroundColor': LIGHT_RED,
+                            'textFormat': {'foregroundColor': UNAVAILABLE_TEXT_COLOR, 'bold': True}
+                        }
+                    }
+                }
+            }
+        }
+    ])
+
+    return rules
     
 def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Apply minimal border styling."""

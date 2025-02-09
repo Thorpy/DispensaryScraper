@@ -175,6 +175,14 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
 def update_google_sheet(config, worksheet, delete_requests, row_count, timestamp_row):
     try:
         col_count = len(config.column_headers)
+         # Prepare data with headers, products, and timestamp
+        data = [config.column_headers] + [list(p) for p in products]
+        timestamp_row = len(data) + 2  # 2 empty rows after data
+        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+
+        # Clear existing data and update with new data
+        worksheet.batch_clear(["A:Z"])
+        worksheet.update(data, 'A1')
 
         # Build the list of format requests
         format_requests = delete_requests + [

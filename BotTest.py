@@ -1,4 +1,4 @@
-### This is just my test script for updates and testing on the raspberry pi ###
+### ==== This is just my test script for updates and testing on the raspberry pi ==== ###
 
 # -*- coding: utf-8 -*-
 """Optimized cannabis dispensary price scraper with Google Sheets integration."""

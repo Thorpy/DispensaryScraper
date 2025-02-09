@@ -261,7 +261,6 @@ def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int
         }
     } for col in config.currency_columns]
 
-
 def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> dict:
     """Create alternating row colors for dispensaries without availability column."""
     if config.availability_column is not None:
@@ -299,19 +298,20 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
     col_index = config.availability_column
     col_letter = chr(65 + col_index)
     rules = []
+    common_range = [{
+        'sheetId': worksheet.id,
+        'startRowIndex': 1,
+        'endRowIndex': row_count + 1,
+        'startColumnIndex': 0,
+        'endColumnIndex': len(config.column_headers)
+    }]
 
     # Available rows - alternating green shades
     rules.extend([
         {  # Even rows - darker green
             'addConditionalFormatRule': {
                 'rule': {
-                    'ranges': [{
-                        'sheetId': worksheet.id,
-                        'startRowIndex': 1,
-                        'endRowIndex': row_count + 1,
-                        'startColumnIndex': 0,
-                        'endColumnIndex': len(config.column_headers)
-                    }],
+                    'ranges': common_range,
                     'booleanRule': {
                         'condition': {
                             'type': 'CUSTOM_FORMULA',
@@ -328,7 +328,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
         {  # Odd rows - lighter green
             'addConditionalFormatRule': {
                 'rule': {
-                    'ranges': [same as above],
+                    'ranges': common_range,
                     'booleanRule': {
                         'condition': {
                             'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISODD(ROW()))'}]
@@ -348,7 +348,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
         {  # Even rows - darker red
             'addConditionalFormatRule': {
                 'rule': {
-                    'ranges': [same as above],
+                    'ranges': common_range,
                     'booleanRule': {
                         'condition': {
                             'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISEVEN(ROW()))'}]
@@ -364,7 +364,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
         {  # Odd rows - lighter red
             'addConditionalFormatRule': {
                 'rule': {
-                    'ranges': [same as above],
+                    'ranges': common_range,
                     'booleanRule': {
                         'condition': {
                             'values': [{"userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISODD(ROW()))'}]

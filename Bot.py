@@ -1,294 +1,492 @@
 # -*- coding: utf-8 -*-
+"""Optimized cannabis dispensary price scraper with Google Sheets integration."""
+
 import os
-import requests
-import logging
-import random
-import time
-from datetime import datetime
-from typing import List, Tuple, Optional
-from google.oauth2.service_account import Credentials
-import gspread
-from bs4 import BeautifulSoup
 import re
-import cloudscraper  # New import for bypassing Cloudflare
+import time
+import logging
+from datetime import datetime
+from typing import List, Tuple, Optional, Dict, Callable
+from dataclasses import dataclass
+from enum import Enum
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import cloudscraper
+from bs4 import BeautifulSoup
+import gspread
+from google.oauth2.service_account import Credentials
 
-CREDENTIALS_PATH = os.getenv(
-    'GOOGLE_CREDENTIALS_PATH',
-    os.path.join(os.path.dirname(__file__), 'credentials.json')
-)
+# ============================= CONFIGURATION ==============================
+@dataclass
+class DispensaryConfig:
+    """Configuration for dispensary scraping and spreadsheet settings."""
+    name: str
+    url: str
+    spreadsheet_id: str
+    sheet_name: str
+    scrape_method: Callable
+    column_headers: List[str]
+    column_widths: Dict[int, int]
+    currency_columns: List[int] = None
+    availability_column: Optional[int] = None
+    use_cloudscraper: bool = True
 
-class Dispensary:
-    def __init__(self, name: str, url: str, spreadsheet_id: str, sheet_name: str,
-                 scrape_method: callable, columns: List[str],
-                 availability_col: Optional[int] = None):
-        self.name = name
-        self.url = url
-        self.spreadsheet_id = spreadsheet_id
-        self.sheet_name = sheet_name
-        self.scrape_method = scrape_method
-        self.columns = columns
-        self.availability_col = availability_col
+class AvailabilityStatus(Enum):
+    AVAILABLE = 'Available'
+    NOT_AVAILABLE = 'Not Available'
 
-def load_credentials() -> Optional[Credentials]:
-    """Load Google Sheets API credentials with error handling."""
+DISPENSARIES = [
+    DispensaryConfig(
+        name="Mamedica",
+        url="https://mamedica.co.uk/repeat-prescription/",
+        spreadsheet_id=os.getenv('MAMEDICA_SHEET_ID', '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'),
+        sheet_name="Mamedica List",
+        scrape_method=lambda url, _: scrape_mamedica_products(url),
+        column_headers=['Product', 'Price'],
+        column_widths={0: 380, 1: 100},
+        currency_columns=[1],
+        use_cloudscraper=True
+    ),
+    DispensaryConfig(
+        name="Montu",
+        url="https://store.montu.uk/products.json",
+        spreadsheet_id=os.getenv('MONTU_SHEET_ID', '1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU'),
+        sheet_name="Montu List",
+        scrape_method=lambda url, _: scrape_montu_products(url),
+        column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
+        column_widths={0: 280, 1: 100, 2: 80, 3: 80, 4: 120},
+        currency_columns=[1],
+        availability_column=4,
+        use_cloudscraper=True
+    )
+]
+
+GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+REQUEST_TIMEOUT = 25
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+# Formatting constants
+HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
+LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}
+DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}
+LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}
+DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}
+ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}
+UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}
+WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}
+TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
+
+# ============================ CORE FUNCTIONALITY ==========================
+def load_google_credentials() -> Optional[Credentials]:
+    """Load Google Sheets API credentials."""
     try:
         return Credentials.from_service_account_file(
-            CREDENTIALS_PATH,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+            os.path.join(os.path.dirname(__file__), 'credentials.json'),
+            scopes=GOOGLE_SCOPES
         )
-    except Exception as e:
-        logging.error(f"Credential loading failed: {e}")
+    except Exception as error:
+        logging.error("Failed to load credentials: %s", error)
         return None
 
-def scrape_mamedica(url: str) -> List[Tuple]:
-    """Scrape Mamedica products using cloudscraper to bypass Cloudflare."""
+def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
+    """Create optimized HTTP client with retries."""
+    if use_cloudscraper:
+        return cloudscraper.create_scraper()
+    
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504]
+    )
+    session.mount('https://', HTTPAdapter(max_retries=retry))
+    session.headers.update({'User-Agent': USER_AGENT})
+    return session
+
+def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float]]:
+    """Scrape products from Mamedica website."""
+    client = create_http_client(use_cloudscraper)
     try:
-        # Create a cloudscraper instance
-        scraper = cloudscraper.create_scraper()
-        
-        # Optionally add a random delay to mimic human browsing
-        time.sleep(random.uniform(1.0, 2.5))
-        
-        response = scraper.get(url, timeout=15)
+        response = client.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-
-        # Verify we received the actual prescription page
-        if "repeat-prescription" not in response.text.lower():
-            logging.warning("Mamedica: Received unexpected page content")
-            return []
-
-        soup = BeautifulSoup(response.text, 'html.parser')
+        
         products = set()
-
-        # Parse products
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
         for option in soup.find_all('option'):
-            if not (value := option.get('value')) or '|' not in value:
-                continue
-
-            try:
-                product_name, price_value = map(str.strip, value.split('|'))
-                price = round(float(price_value), 2)
-                products.add((product_name, price))
-            except (IndexError, ValueError, TypeError) as e:
-                logging.warning(f"Mamedica: Error parsing product - {str(e)}")
-                continue
+            if 'value' in option.attrs and '|' in option['value']:
+                product_name, price_str = option['value'].split('|', 1)
+                products.add((
+                    product_name.strip(),
+                    round(float(price_str.strip()), 2)
+                ))
 
         return sorted(products, key=lambda x: x[0])
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Mamedica: Request failed - {str(e)}")
+    
+    except requests.exceptions.Timeout:
+        logging.error("Mamedica request timed out")
         return []
-    except Exception as e:
-        logging.error(f"Mamedica: Unexpected error - {str(e)}")
+    except Exception as error:
+        logging.error("Mamedica error: %s", error)
         return []
 
-def scrape_montu(url: str) -> List[Tuple[str, float, str, str, str]]:
-    """Scrape Montu products with pagination and error handling."""
-    all_products = []
-    page = 1
-    retries = 3
+def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
+    """Scrape products from Montu/Australis website."""
+    client = create_http_client(use_cloudscraper)
+    try:
+        start_time = time.monotonic()
+        response = client.get(f"{url}?limit=250", timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        products = []
+        cannabinoid_pattern = re.compile(r'(THC|CBD)[\s:]*([\d.]+)%', re.IGNORECASE)
+        
+        for product in data.get('products', []):
+            if not product.get('variants'):
+                continue
+            
+            variant = product['variants'][0]
+            matches = cannabinoid_pattern.findall(product.get('body_html', ''))
+            cannabinoids = {m[0].lower(): f"{m[1]}%" for m in matches}
+            
+            products.append((
+                product.get('title', '').strip(),
+                float(variant.get('price', '0').replace('£', '').replace(',', '')),
+                cannabinoids.get('thc', 'N/A'),
+                cannabinoids.get('cbd', 'N/A'),
+                AvailabilityStatus.AVAILABLE.value if variant.get('available') 
+                else AvailabilityStatus.NOT_AVAILABLE.value
+            ))
+        
+        products.sort(key=lambda x: (x[4] == AvailabilityStatus.NOT_AVAILABLE.value, x[0]))
+        logging.info(f"Montu: Processed {len(products)} products in {time.monotonic()-start_time:.2f}s")
+        return products
+    
+    except Exception as error:
+        logging.error("Montu error: %s", error)
+        return []
 
-    while retries > 0:
-        try:
-            response = requests.get(f"{url}?page={page}", timeout=15)
-            response.raise_for_status()
-            products = response.json().get('products', [])
+def update_google_sheet(config, worksheet, products):
+    """Update Google Sheet with data and formatting."""
+    try:
+        # Prepare data with headers, products, and timestamp
+        data = [config.column_headers] + [list(p) for p in products]
+        timestamp_row = len(data) + 2  # 2 empty rows after data
+        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
 
-            if not products:
-                break
+        # Clear existing data and update with new data
+        worksheet.batch_clear(["A:Z"])
+        worksheet.update(data, 'A1')
 
-            for product in products:
-                try:
-                    title = product.get('title', '').strip()
-                    variant = product['variants'][0]
-                    price = float(variant['price'].strip())
-                    body_html = product.get('body_html', '')
+        # Build formatting requests
+        format_requests = [
+            _create_header_format(worksheet),
+            *_create_column_widths(config, worksheet),
+            *_create_currency_formats(config, worksheet, len(products)),
+            _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
+            *_create_availability_rules(config, worksheet, len(products)),
+            _create_optimized_borders(worksheet, len(products), len(config.column_headers)),
+            _create_frozen_header(worksheet),
+            _create_timestamp_format(worksheet, timestamp_row),
+            *_create_text_alignment(worksheet, len(products), config)
+        ]
 
-                    thc_match = re.search(r'THC\s*([\d.]+)%', body_html, re.IGNORECASE)
-                    cbd_match = re.search(r'CBD\s*([\d.]+)%', body_html, re.IGNORECASE)
+        # Execute batch update with valid requests
+        if valid_requests := [r for r in format_requests if r]:
+            worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
-                    thc = float(thc_match.group(1)) if thc_match else None
-                    cbd = float(cbd_match.group(1)) if cbd_match else None
+        logging.info(f"{config.name} sheet updated successfully")
 
-                    all_products.append((
-                        title,
-                        price,
-                        f"{thc:.1f}%" if thc is not None else "Unknown",
-                        f"{cbd:.1f}%" if cbd is not None else "Unknown",
-                        'Available' if variant['available'] else 'Not Available'
-                    ))
-                except (KeyError, IndexError, ValueError) as e:
-                    logging.warning(f"Error parsing product: {e}")
+    except Exception as error:
+        logging.error("Sheet update failed: %s", error)
 
-            page += 1
-            retries = 3
-        except (requests.RequestException, ValueError):
-            retries -= 1
-            logging.warning(f"Retrying Montu page {page} ({retries} left)...")
+# ============================ HELPER FUNCTIONS ============================
+def _get_or_create_worksheet(spreadsheet, sheet_name: str):
+    """Manage worksheet creation/retrieval."""
+    try:
+        return spreadsheet.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
-    return sorted(all_products, key=lambda x: (x[4] == 'Not Available', x[0]))
-
-def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
-                          availability_col: Optional[int]) -> List[dict]:
-    """Generate Google Sheets formatting requests with API-compliant rules."""
-    sheet_id = worksheet.id
-    requests_list = []
-
-    # Base cell formatting
-    requests_list.append({
+def _create_header_format(worksheet) -> dict:
+    """Create header row formatting."""
+    return {
         'repeatCell': {
-            'range': {
-                'sheetId': sheet_id,
-                'startRowIndex': 0,
-                'endRowIndex': len(data) + 3 if data else 3,
-                'startColumnIndex': 0,
-                'endColumnIndex': len(columns)
-            },
+            'range': {'sheetId': worksheet.id, 'startRowIndex': 0, 'endRowIndex': 1},
             'cell': {
                 'userEnteredFormat': {
-                    'wrapStrategy': 'WRAP',
-                    'verticalAlignment': 'MIDDLE',
-                    'horizontalAlignment': 'CENTER',
-                    'borders': {
-                        'top': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
-                        'bottom': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
-                        'left': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
-                        'right': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}}
-                    }
-                }
-            },
-            'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment,borders)'
-        }
-    })
-
-    # Header styling
-    requests_list.append({
-        'repeatCell': {
-            'range': {
-                'sheetId': sheet_id,
-                'startRowIndex': 0,
-                'endRowIndex': 1,
-                'startColumnIndex': 0,
-                'endColumnIndex': len(columns)
-            },
-            'cell': {
-                'userEnteredFormat': {
+                    'backgroundColor': HEADER_BG_COLOR,
                     'textFormat': {
+                        'foregroundColor': WHITE_TEXT,
                         'bold': True,
-                        'fontSize': 12,
-                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}
+                        'fontSize': 12
                     },
                     'horizontalAlignment': 'CENTER',
-                    'backgroundColor': {'red': 0.1, 'green': 0.2, 'blue': 0.3},
-                    'borders': {
-                        'top': {'style': 'SOLID', 'width': 2, 'color': {'red': 0, 'green': 0, 'blue': 0}},
-                        'bottom': {'style': 'SOLID', 'width': 2, 'color': {'red': 0, 'green': 0, 'blue': 0}}
-                    }
+                    'wrapStrategy': 'WRAP'
                 }
             },
-            'fields': 'userEnteredFormat(textFormat,horizontalAlignment,backgroundColor,borders)'
+            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
         }
-    })
+    }
 
-    # Column widths
-    column_widths = {0: 180, 1: 100, 2: 80, 3: 80, 4: 110}
-    for col, width in column_widths.items():
-        if col < len(columns):
-            requests_list.append({
-                'updateDimensionProperties': {
-                    'range': {'sheetId': sheet_id, 'dimension': 'COLUMNS', 'startIndex': col},
-                    'properties': {'pixelSize': width},
-                    'fields': 'pixelSize'
-                }
-            })
+def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
+    """Set column widths."""
+    return [{
+        'updateDimensionProperties': {
+            'range': {
+                'sheetId': worksheet.id,
+                'dimension': 'COLUMNS',
+                'startIndex': col,
+                'endIndex': col + 1
+            },
+            'properties': {'pixelSize': width},
+            'fields': 'pixelSize'
+        }
+    } for col, width in config.column_widths.items()]
 
-    if data:
-        # Alternating row colors (API-compliant)
-        requests_list.append({
-            'addConditionalFormatRule': {
-                'rule': {
-                    'ranges': [{
-                        'sheetId': sheet_id,
-                        'startRowIndex': 1,
-                        'endRowIndex': len(data) + 1
-                    }],
-                    'booleanRule': {
-                        'condition': {'type': 'CUSTOM_FORMULA', 'values': [{'userEnteredValue': '=ISEVEN(ROW())'}]},
-                        'format': {
-                            'backgroundColor': {'red': 0.98, 'green': 0.98, 'blue': 0.98}
-                        }
-                    }
-                }
-            }
-        })
-
-        # Price formatting
-        requests_list.append({
-            'repeatCell': {
-                'range': {'sheetId': sheet_id, 'startRowIndex': 1, 'startColumnIndex': 1},
-                'cell': {
-                    'userEnteredFormat': {
-                        'numberFormat': {'type': 'CURRENCY', 'pattern': '"£"#,##0.00'},
-                        'horizontalAlignment': 'RIGHT'
-                    }
-                },
-                'fields': 'userEnteredFormat(numberFormat,horizontalAlignment)'
-            }
-        })
-
-        # Availability formatting (API-compliant)
-        if availability_col is not None:
-            availability_range = {
-                'sheetId': sheet_id,
-                'startRowIndex': 1,
-                'startColumnIndex': availability_col
-            }
-            requests_list.extend([
-                {
-                    'addConditionalFormatRule': {
-                        'rule': {
-                            'ranges': [availability_range],
-                            'booleanRule': {
-                                'condition': {'type': 'TEXT_EQ', 'values': [{'userEnteredValue': 'Not Available'}]},
-                                'format': {
-                                    'backgroundColor': {'red': 1, 'green': 0.9, 'blue': 0.9},
-                                    'textFormat': {'bold': True}
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    'addConditionalFormatRule': {
-                        'rule': {
-                            'ranges': [availability_range],
-                            'booleanRule': {
-                                'condition': {'type': 'TEXT_EQ', 'values': [{'userEnteredValue': 'Available'}]},
-                                'format': {
-                                    'backgroundColor': {'red': 0.85, 'green': 0.95, 'blue': 0.85},
-                                    'textFormat': {'bold': True}
-                                }
-                            }
-                        }
-                    }
-                }
-            ])
-
-    # Timestamp formatting
-    timestamp_row = len(data) + 2 if data else 2
-    requests_list.append({
+def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
+    """Apply currency formatting."""
+    return [{
         'repeatCell': {
             'range': {
-                'sheetId': sheet_id,
-                'startRowIndex': timestamp_row,
-                'endRowIndex': timestamp_row + 1,
+                'sheetId': worksheet.id,
+                'startRowIndex': 1,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': col,
+                'endColumnIndex': col + 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'numberFormat': {'type': 'CURRENCY', 'pattern': '£#,##0.00'}
+                }
+            },
+            'fields': 'userEnteredFormat.numberFormat'
+        }
+    } for col in config.currency_columns]
+
+def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> dict:
+    """Create alternating row colors for dispensaries without an availability column."""
+    if config.availability_column is not None:
+        return None  # Handled by availability rules
+
+    # For Mamedica, use a more noticeable grey difference
+    if config.name == "Mamedica":
+        zebra_color = {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+        text_color = {'red': 0.15, 'green': 0.15, 'blue': 0.15}
+    else:
+        zebra_color = ALTERNATING_ROW_COLOR
+        text_color = {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+
+    return {
+        'addConditionalFormatRule': {
+            'rule': {
+                'ranges': [{
+                    'sheetId': worksheet.id,
+                    'startRowIndex': 1,
+                    'endRowIndex': row_count + 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': col_count
+                }],
+                'booleanRule': {
+                    'condition': {
+                        'type': 'CUSTOM_FORMULA',
+                        'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
+                    },
+                    'format': {
+                        'backgroundColor': zebra_color,
+                        'textFormat': {'foregroundColor': text_color}
+                    }
+                }
+            }
+        }
+    }
+
+def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
+    """Create advanced availability formatting with alternating shades."""
+    if config.availability_column is None:
+        return []
+    
+    col_index = config.availability_column
+    col_letter = chr(65 + col_index)
+    rules = []
+    common_range = [{
+        'sheetId': worksheet.id,
+        'startRowIndex': 1,
+        'endRowIndex': row_count + 1,
+        'startColumnIndex': 0,
+        'endColumnIndex': len(config.column_headers)
+    }]
+
+    # For Montu, use custom text colors; otherwise, use defaults.
+    if config.name == "Montu":
+        available_even_text = {'red': 0.0, 'green': 0.65, 'blue': 0.0}
+        available_odd_text  = {'red': 0.0, 'green': 0.55, 'blue': 0.0}
+        unavailable_even_text = {'red': 0.65, 'green': 0.0, 'blue': 0.0}
+        unavailable_odd_text  = {'red': 0.55, 'green': 0.0, 'blue': 0.0}
+    else:
+        available_even_text = WHITE_TEXT
+        available_odd_text  = AVAILABLE_TEXT_COLOR
+        unavailable_even_text = WHITE_TEXT
+        unavailable_odd_text  = UNAVAILABLE_TEXT_COLOR
+
+    # Available rows - alternating green shades
+    rules.extend([
+        {  # Even rows
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': common_range,
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISEVEN(ROW()))'
+                            }]
+                        },
+                        'format': {
+                            'backgroundColor': DARK_GREEN,
+                            'textFormat': {'foregroundColor': available_even_text, 'bold': True}
+                        }
+                    }
+                }
+            }
+        },
+        {  # Odd rows
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': common_range,
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.AVAILABLE.value}", ISODD(ROW()))'
+                            }]
+                        },
+                        'format': {
+                            'backgroundColor': LIGHT_GREEN,
+                            'textFormat': {'foregroundColor': available_odd_text, 'bold': True}
+                        }
+                    }
+                }
+            }
+        }
+    ])
+
+    # Unavailable rows - alternating red shades
+    rules.extend([
+        {  # Even rows
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': common_range,
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISEVEN(ROW()))'
+                            }]
+                        },
+                        'format': {
+                            'backgroundColor': DARK_RED,
+                            'textFormat': {'foregroundColor': unavailable_even_text, 'bold': True}
+                        }
+                    }
+                }
+            }
+        },
+        {  # Odd rows
+            'addConditionalFormatRule': {
+                'rule': {
+                    'ranges': common_range,
+                    'booleanRule': {
+                        'condition': {
+                            'type': 'CUSTOM_FORMULA',
+                            'values': [{
+                                "userEnteredValue": f'=AND(${col_letter}2="{AvailabilityStatus.NOT_AVAILABLE.value}", ISODD(ROW()))'
+                            }]
+                        },
+                        'format': {
+                            'backgroundColor': LIGHT_RED,
+                            'textFormat': {'foregroundColor': unavailable_odd_text, 'bold': True}
+                        }
+                    }
+                }
+            }
+        }
+    ])
+
+    return rules
+
+def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
+    """Apply minimal border styling."""
+    return {
+        'updateBorders': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': col_count
+            },
+            'top': {'style': 'SOLID', 'width': 1},
+            'bottom': {'style': 'SOLID', 'width': 1},
+            'left': {'style': 'SOLID', 'width': 1},
+            'right': {'style': 'SOLID', 'width': 1},
+            'innerHorizontal': {'style': 'NONE'},
+            'innerVertical': {'style': 'NONE'}
+        }
+    }
+
+def _create_frozen_header(worksheet) -> dict:
+    """Freeze header row."""
+    return {
+        'updateSheetProperties': {
+            'properties': {
+                'sheetId': worksheet.id,
+                'gridProperties': {'frozenRowCount': 1}
+            },
+            'fields': 'gridProperties.frozenRowCount'
+        }
+    }
+
+def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) -> List[dict]:
+    """Set column alignment and text wrapping."""
+    alignments = {
+        0: ('LEFT', 'WRAP'),
+        1: ('RIGHT', 'OVERFLOW_CELL'),
+        2: ('CENTER', 'OVERFLOW_CELL'),
+        3: ('CENTER', 'OVERFLOW_CELL'),
+        4: ('CENTER', 'OVERFLOW_CELL')
+    }
+    return [{
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 1,
+                'endRowIndex': row_count + 1,
+                'startColumnIndex': col,
+                'endColumnIndex': col + 1
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    'horizontalAlignment': alignment,
+                    'wrapStrategy': wrap_strategy
+                }
+            },
+            'fields': 'userEnteredFormat(horizontalAlignment,wrapStrategy)'
+        }
+    } for col, (alignment, wrap_strategy) in alignments.items()]
+
+def _create_timestamp_format(worksheet, row: int) -> dict:
+    """Format timestamp row."""
+    return {
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': row,
+                'endRowIndex': row + 1,
                 'startColumnIndex': 0,
                 'endColumnIndex': 1
             },
@@ -296,87 +494,44 @@ def create_format_requests(worksheet, data: List[Tuple], columns: List[str],
                 'userEnteredFormat': {
                     'textFormat': {
                         'italic': True,
-                        'bold': True,
                         'fontSize': 10,
-                        'foregroundColor': {'red': 0.5, 'green': 0.5, 'blue': 0.5}
+                        'foregroundColor': TIMESTAMP_COLOR
                     },
                     'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
                 }
             },
             'fields': 'userEnteredFormat(textFormat,backgroundColor)'
         }
-    })
+    }
 
-    # Freeze header row
-    requests_list.append({
-        'updateSheetProperties': {
-            'properties': {'sheetId': sheet_id, 'gridProperties': {'frozenRowCount': 1}},
-            'fields': 'gridProperties.frozenRowCount'
-        }
-    })
-
-    return requests_list
-
-def update_google_sheet(creds: Credentials, dispensary: Dispensary, data: List[Tuple]):
-    """Update Google Sheet with data and formatting."""
-    try:
-        gc = gspread.authorize(creds)
-        spreadsheet = gc.open_by_key(dispensary.spreadsheet_id)
-        worksheet = spreadsheet.worksheet(dispensary.sheet_name)
-
-        # Prepare data with empty row before timestamp
-        timestamp = datetime.now().strftime("Updated on: %H:%M %d/%m/%Y")
-        updates = [dispensary.columns] + data + [[]] + [[timestamp]]
-
-        worksheet.clear()
-        worksheet.update(updates, 'A1')
-
-        # Apply formatting
-        format_requests = create_format_requests(worksheet, data, dispensary.columns, dispensary.availability_col)
-        if format_requests:
-            spreadsheet.batch_update({'requests': format_requests})
-
-        logging.info(f"Successfully updated {dispensary.name} with {len(data)} products")
-
-    except gspread.exceptions.APIError as e:
-        logging.error(f"Google API Error: {e.response.text}")
-    except Exception as e:
-        logging.error(f"Failed to update {dispensary.name}: {str(e)}")
-
+# =============================== MAIN FLOW ================================
 def main():
-    creds = load_credentials()
-    if not creds:
+    """Main execution flow."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+
+    if not (credentials := load_google_credentials()):
         return
 
-    dispensaries = [
-        Dispensary(
-            name="Mamedica",
-            url="https://mamedica.co.uk/repeat-prescription/",
-            spreadsheet_id=os.getenv('MAMEDICA_SHEET_ID', '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'),
-            sheet_name="Mamedica List",
-            scrape_method=scrape_mamedica,
-            columns=['Product', 'Price']
-        ),
-        Dispensary(
-            name="Montu",
-            url="https://store.montu.uk/products.json",
-            spreadsheet_id=os.getenv('MONTU_SHEET_ID', '1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU'),
-            sheet_name="Montu List",
-            scrape_method=scrape_montu,
-            columns=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
-            availability_col=4
-        )
-    ]
+    client = gspread.authorize(credentials)
 
-    for dispensary in dispensaries:
+    for dispensary in DISPENSARIES:
+        start_time = time.monotonic()
+        logging.info(f"Starting {dispensary.name}")
+        
         try:
-            logging.info(f"Processing {dispensary.name}")
-            if data := dispensary.scrape_method(dispensary.url):
-                update_google_sheet(creds, dispensary, data)
-            else:
-                logging.warning(f"No data found for {dispensary.name}")
+            if products := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
+                spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
+                worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
+                update_google_sheet(dispensary, worksheet, products)
+                
         except Exception as e:
-            logging.error(f"Error processing {dispensary.name}: {e}")
+            logging.error(f"Error processing {dispensary.name}: {str(e)}")
+        
+        logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
 
 if __name__ == "__main__":
     main()

@@ -599,7 +599,7 @@ def main():
     for dispensary in DISPENSARIES:
         try:
             start_time = time.monotonic()
-            products = dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper)
+            products = dispensary.scrape_method(dispensary.url, dispensary)
             if products:
                 spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
                 worksheet = spreadsheet.worksheet(dispensary.sheet_name)

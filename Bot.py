@@ -29,7 +29,10 @@ class DispensaryConfig:
     scrape_method: Callable
     column_headers: List[str]
     column_widths: Dict[int, int]
-    currency_columns: List[int] = None
+    currency_columns: List[int]
+    header_color: Dict[str, float]  # New config field
+    even_stripe: Dict[str, float]   # New config field
+    odd_stripe: Dict[str, float]    # New config field
     availability_column: Optional[int] = None
     use_cloudscraper: bool = True
 
@@ -47,7 +50,9 @@ DISPENSARIES = [
         column_headers=['Product', 'Price'],
         column_widths={0: 380, 1: 60},
         currency_columns=[1],
-        use_cloudscraper=True
+        header_color={'red': 0.12, 'green': 0.24, 'blue': 0.35},
+        even_stripe={'red': 0.85, 'green': 0.95, 'blue': 0.85},
+        odd_stripe={'red': 0.7, 'green': 0.9, 'blue': 0.7}
     ),
     DispensaryConfig(
         name="Montu",
@@ -59,25 +64,15 @@ DISPENSARIES = [
         column_widths={0: 280, 1: 100, 2: 80, 3: 80, 4: 120},
         currency_columns=[1],
         availability_column=4,
-        use_cloudscraper=True
+        header_color={'red': 0.12, 'green': 0.24, 'blue': 0.35},
+        even_stripe={'red': 0.97, 'green': 0.97, 'blue': 0.97},
+        odd_stripe={'red': 1, 'green': 1, 'blue': 1}
     )
 ]
 
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 REQUEST_TIMEOUT = 25
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-
-# Formatting constants
-HEADER_BG_COLOR = {'red': 0.12, 'green': 0.24, 'blue': 0.35}
-LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}
-DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}
-LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}
-DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}
-ALTERNATING_ROW_COLOR = {'red': 0.97, 'green': 0.97, 'blue': 0.97}
-AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}
-UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}
-WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}
-TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
 def load_google_credentials() -> Optional[Credentials]:
@@ -106,9 +101,9 @@ def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
     session.headers.update({'User-Agent': USER_AGENT})
     return session
 
-def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float]]:
+def scrape_mamedica_products(url: str) -> List[Tuple[str, float]]:
     """Scrape products from Mamedica website."""
-    client = create_http_client(use_cloudscraper)
+    client = create_http_client(True)  # Force cloudscraper for Mamedica
     try:
         response = client.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
@@ -133,9 +128,9 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
         logging.error("Mamedica error: %s", error)
         return []
 
-def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple[str, float, str, str, str]]:
+def scrape_montu_products(url: str) -> List[Tuple[str, float, str, str, str]]:
     """Scrape products from Montu/Australis website."""
-    client = create_http_client(use_cloudscraper)
+    client = create_http_client(True)  # Force cloudscraper for Montu
     try:
         start_time = time.monotonic()
         response = client.get(f"{url}?limit=250", timeout=15)
@@ -170,21 +165,21 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         logging.error("Montu error: %s", error)
         return []
 
-def update_google_sheet(config, worksheet, products):
+def update_google_sheet(config: DispensaryConfig, worksheet, products):
     """Update Google Sheet with data and formatting."""
     try:
         # Prepare data with headers, products, and timestamp
         data = [config.column_headers] + [list(p) for p in products]
-        timestamp_row = len(data) + 2  # 2 empty rows after data
+        timestamp_row = len(data) + 2
         data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
 
         # Clear existing data and update with new data
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
 
-        # Build formatting requests
+        # Build formatting requests using config values
         format_requests = [
-            _create_header_format(config, worksheet),  # Pass config here
+            _create_header_format(config, worksheet),
             *_create_column_widths(config, worksheet),
             *_create_currency_formats(config, worksheet, len(products)),
             _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
@@ -195,7 +190,6 @@ def update_google_sheet(config, worksheet, products):
             *_create_text_alignment(worksheet, len(products), config)
         ]
 
-        # Execute batch update with valid requests
         if valid_requests := [r for r in format_requests if r]:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
@@ -212,87 +206,37 @@ def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     except gspread.exceptions.WorksheetNotFound:
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
-def _create_header_format(config, worksheet) -> dict:
-    """Create header row formatting for used columns only."""
-    requests = []
-
-    # Only format columns that are used
-    for index, header in enumerate(config.column_headers):
-        if header:  # Only format if header is not empty
-            requests.append({
-                'repeatCell': {
-                    'range': {
-                        'sheetId': worksheet.id,
-                        'startRowIndex': 0,
-                        'endRowIndex': 1,
-                        'startColumnIndex': index,
-                        'endColumnIndex': index + 1
-                    },
-                    'cell': {
-                        'userEnteredFormat': {
-                            'backgroundColor': HEADER_BG_COLOR,  # Apply color if needed
-                            'textFormat': {
-                                'foregroundColor': WHITE_TEXT,
-                                'bold': True,
-                                'fontSize': 12
-                            },
-                            'horizontalAlignment': 'CENTER',
-                                'wrapStrategy': 'WRAP'
-                        }
-                    },
-                    'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
-                }
-            })
-
-    return requests
-
-def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
-    """Set column widths."""
-    return [{
-        'updateDimensionProperties': {
-            'range': {
-                'sheetId': worksheet.id,
-                'dimension': 'COLUMNS',
-                'startIndex': col,
-                'endIndex': col + 1
-            },
-            'properties': {'pixelSize': width},
-            'fields': 'pixelSize'
-        }
-    } for col, width in config.column_widths.items()]
-
-def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
-    """Apply currency formatting."""
-    return [{
+def _create_header_format(config: DispensaryConfig, worksheet) -> dict:
+    """Create header row formatting using config values."""
+    return {
         'repeatCell': {
             'range': {
                 'sheetId': worksheet.id,
-                'startRowIndex': 1,
-                'endRowIndex': row_count + 1,
-                'startColumnIndex': col,
-                'endColumnIndex': col + 1
+                'startRowIndex': 0,
+                'endRowIndex': 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': len(config.column_headers)
             },
             'cell': {
                 'userEnteredFormat': {
-                    'numberFormat': {'type': 'CURRENCY', 'pattern': '£#,##0.00'}
+                    'backgroundColor': config.header_color,
+                    'textFormat': {
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
+                        'bold': True,
+                        'fontSize': 12
+                    },
+                    'horizontalAlignment': 'CENTER',
+                    'wrapStrategy': 'WRAP'
                 }
             },
-            'fields': 'userEnteredFormat.numberFormat'
+            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
         }
-    } for col in config.currency_columns]
+    }
 
-def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> dict:
-    """Create alternating row colors for dispensaries without an availability column."""
+def _create_zebra_stripes(config: DispensaryConfig, worksheet, row_count: int, col_count: int) -> dict:
+    """Create alternating row colors using config values."""
     if config.availability_column is not None:
         return None  # Handled by availability rules
-
-    # For Mamedica, use a more noticeable grey difference
-    if config.name == "Mamedica":
-        zebra_color = {'red': 0.9, 'green': 0.9, 'blue': 0.9}
-        text_color = {'red': 0.15, 'green': 0.15, 'blue': 0.15}
-    else:
-        zebra_color = ALTERNATING_ROW_COLOR
-        text_color = {'red': 0.2, 'green': 0.2, 'blue': 0.2}
 
     return {
         'addConditionalFormatRule': {
@@ -310,8 +254,8 @@ def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> 
                         'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
                     },
                     'format': {
-                        'backgroundColor': zebra_color,
-                        'textFormat': {'foregroundColor': text_color}
+                        'backgroundColor': config.even_stripe,
+                        'textFormat': {'foregroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
                     }
                 }
             }
@@ -536,7 +480,8 @@ def main():
         logging.info(f"Starting {dispensary.name}")
 
         try:
-            if products := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
+            products = dispensary.scrape_method(dispensary.url)
+            if products:
                 spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
                 worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
                 update_google_sheet(dispensary, worksheet, products)

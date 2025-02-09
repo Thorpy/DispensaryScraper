@@ -170,33 +170,43 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         logging.error("Montu error: %s", error)
         return []
 
-def update_google_sheet(config, worksheet, products):
-    """Update Google Sheet with data and formatting."""
+def update_google_sheet(credentials: Credentials, config: DispensaryConfig, products: List[Tuple]):
+    """Optimized Google Sheets update with batch updates for both data and formatting."""
     try:
-        # Prepare data with headers, products, and timestamp
-        data = [config.column_headers] + [list(p) for p in products]
-        timestamp_row = len(data) + 2  # 2 empty rows after data
-        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+        gc = gspread.authorize(credentials)
+        spreadsheet = gc.open_by_key(config.spreadsheet_id)
+        worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
 
-        # Clear existing data and update with new data
+        # Clear the existing data in one batch
         worksheet.batch_clear(["A:Z"])
-        worksheet.update(data, 'A1')
 
-        # Build formatting requests
+        # Prepare and update data using bulk update
+        data = [config.column_headers] + [list(p) for p in products]
+        worksheet.update(data, 'A1')  # Bulk update for data
+
+        # Determine the number of used columns based on the headers provided
+        col_count = len(config.column_headers)
+        row_count = len(products)
+
+        # Prepare all formatting requests, ensuring header formatting applies only to used columns
         format_requests = [
-            _create_header_format(worksheet),
+            _create_header_format(worksheet, col_count),
             *_create_column_widths(config, worksheet),
-            *_create_currency_formats(config, worksheet, len(products)),
-            _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
-            *_create_availability_rules(config, worksheet, len(products)),
-            _create_optimized_borders(worksheet, len(products), len(config.column_headers)),
+            _create_currency_formats(config, worksheet, row_count),
+            _create_row_color_rule(worksheet, row_count, col_count),
+            _create_availability_rules(config, worksheet, row_count),
+            _create_data_borders(worksheet, row_count, col_count),
             _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, timestamp_row),
-            *_create_text_alignment(worksheet, len(products), config)
+            _create_timestamp_format(worksheet, len(data) + 2)
         ]
 
-        # Execute batch update with valid requests
-        if valid_requests := [r for r in format_requests if r]:
+        # Update the timestamp in a single update
+        timestamp = [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+        worksheet.update(range_name=f'A{len(data)+2}', values=timestamp)
+
+        # Execute all formatting requests in one batch call
+        valid_requests = [r for r in format_requests if r]
+        if valid_requests:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
         logging.info(f"{config.name} sheet updated successfully")
@@ -212,24 +222,32 @@ def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     except gspread.exceptions.WorksheetNotFound:
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
-def _create_header_format(worksheet) -> dict:
-    """Create header row formatting."""
+def _create_header_format(worksheet, col_count: int) -> dict:
+    """
+    Apply header formatting only to the used header cells.
+    This limits the background color and formatting to the first `col_count` columns.
+    """
     return {
         'repeatCell': {
-            'range': {'sheetId': worksheet.id, 'startRowIndex': 0, 'endRowIndex': 1},
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': 1,
+                'startColumnIndex': 0,
+                'endColumnIndex': col_count
+            },
             'cell': {
                 'userEnteredFormat': {
                     'backgroundColor': HEADER_BG_COLOR,
                     'textFormat': {
-                        'foregroundColor': WHITE_TEXT,
+                        'foregroundColor': {'red': 1, 'green': 1, 'blue': 1},
                         'bold': True,
                         'fontSize': 12
                     },
-                    'horizontalAlignment': 'CENTER',
-                    'wrapStrategy': 'WRAP'
+                    'horizontalAlignment': 'CENTER'
                 }
             },
-            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,wrapStrategy)'
+            'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
         }
     }
 

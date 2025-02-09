@@ -180,7 +180,7 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         # Clear the existing data in one batch
         worksheet.batch_clear(["A:Z"])
 
-        # Prepare and update data using bulk update
+        # Prepare and update data using a bulk update
         data = [config.column_headers] + [list(p) for p in products]
         worksheet.update(data, 'A1')  # Bulk update for data
 
@@ -188,9 +188,12 @@ def update_google_sheet(credentials: Credentials, config: DispensaryConfig, prod
         col_count = len(config.column_headers)
         row_count = len(products)
 
-        # Prepare all formatting requests, ensuring header formatting applies only to used columns
+        # Prepare all formatting requests:
+        # - Apply header formatting only to the used header cells,
+        # - Clear formatting for unused header cells,
+        # - And add other formatting (column widths, currency, row colors, etc.)
         format_requests = [
-            _create_header_format(worksheet, col_count),
+            *(_create_header_format(worksheet, col_count)),  # Flatten the list of header formatting requests
             *_create_column_widths(config, worksheet),
             _create_currency_formats(config, worksheet, row_count),
             _create_row_color_rule(worksheet, row_count, col_count),
@@ -222,12 +225,12 @@ def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     except gspread.exceptions.WorksheetNotFound:
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
 
-def _create_header_format(worksheet, col_count: int) -> dict:
+def _create_header_format(worksheet, col_count: int, max_columns: int = 26) -> List[dict]:
     """
-    Apply header formatting only to the used header cells.
-    This limits the background color and formatting to the first `col_count` columns.
+    Apply header formatting only to the used header cells (columns 0 to col_count)
+    and clear formatting for the remaining header cells (columns col_count to max_columns).
     """
-    return {
+    used_header_format = {
         'repeatCell': {
             'range': {
                 'sheetId': worksheet.id,
@@ -250,7 +253,36 @@ def _create_header_format(worksheet, col_count: int) -> dict:
             'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)'
         }
     }
-
+    clear_unused_header_format = {
+        'repeatCell': {
+            'range': {
+                'sheetId': worksheet.id,
+                'startRowIndex': 0,
+                'endRowIndex': 1,
+                'startColumnIndex': col_count,
+                'endColumnIndex': max_columns
+            },
+            'cell': {
+                'userEnteredFormat': {
+                    # Set background to transparent for unused header cells
+                    'backgroundColor': {
+                        'red': 1,
+                        'green': 1,
+                        'blue': 1,
+                        'alpha': 0
+                    },
+                    # Reset text formatting (optional)
+                    'textFormat': {
+                        'foregroundColor': {'red': 0, 'green': 0, 'blue': 0},
+                        'bold': False,
+                        'fontSize': 12
+                    }
+                }
+            },
+            'fields': 'userEnteredFormat(backgroundColor,textFormat)'
+        }
+    }
+    return [used_header_format, clear_unused_header_format]
 def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
     """Set column widths."""
     return [{

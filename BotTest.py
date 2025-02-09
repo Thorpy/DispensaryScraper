@@ -486,6 +486,7 @@ def main():
         logging.info(f"Starting {dispensary.name}")
         
         try:
+            # Scrape data from the dispensary
             if data := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
                 # Open the spreadsheet and get (or create) the worksheet
                 spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
@@ -496,7 +497,7 @@ def main():
                 timestamp_row = row_count + 1
 
                 update_start = time.monotonic()
-                # Pass an empty list for delete_requests if not used
+                # Call update_google_sheet with all required parameters.
                 update_google_sheet(dispensary, worksheet, [], row_count, timestamp_row)
                 logging.info(f"Updated {dispensary.name} in {time.monotonic() - update_start:.2f}s")
         except Exception as e:

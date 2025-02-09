@@ -95,7 +95,7 @@ def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
     """Create optimized HTTP client with retries."""
     if use_cloudscraper:
         return cloudscraper.create_scraper()
-    
+
     session = requests.Session()
     retry = Retry(
         total=3,
@@ -112,10 +112,10 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
     try:
         response = client.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-        
+
         products = set()
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         for option in soup.find_all('option'):
             if 'value' in option.attrs and '|' in option['value']:
                 product_name, price_str = option['value'].split('|', 1)
@@ -125,7 +125,7 @@ def scrape_mamedica_products(url: str, use_cloudscraper: bool = True) -> List[Tu
                 ))
 
         return sorted(products, key=lambda x: x[0])
-    
+
     except requests.exceptions.Timeout:
         logging.error("Mamedica request timed out")
         return []
@@ -141,31 +141,31 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         response = client.get(f"{url}?limit=250", timeout=15)
         response.raise_for_status()
         data = response.json()
-        
+
         products = []
         cannabinoid_pattern = re.compile(r'(THC|CBD)[\s:]*([\d.]+)%', re.IGNORECASE)
-        
+
         for product in data.get('products', []):
             if not product.get('variants'):
                 continue
-            
+
             variant = product['variants'][0]
             matches = cannabinoid_pattern.findall(product.get('body_html', ''))
             cannabinoids = {m[0].lower(): f"{m[1]}%" for m in matches}
-            
+
             products.append((
                 product.get('title', '').strip(),
                 float(variant.get('price', '0').replace('£', '').replace(',', '')),
                 cannabinoids.get('thc', 'N/A'),
                 cannabinoids.get('cbd', 'N/A'),
-                AvailabilityStatus.AVAILABLE.value if variant.get('available') 
+                AvailabilityStatus.AVAILABLE.value if variant.get('available')
                 else AvailabilityStatus.NOT_AVAILABLE.value
             ))
-        
+
         products.sort(key=lambda x: (x[4] == AvailabilityStatus.NOT_AVAILABLE.value, x[0]))
         logging.info(f"Montu: Processed {len(products)} products in {time.monotonic()-start_time:.2f}s")
         return products
-    
+
     except Exception as error:
         logging.error("Montu error: %s", error)
         return []
@@ -309,7 +309,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
     """Create advanced availability formatting with alternating shades."""
     if config.availability_column is None:
         return []
-    
+
     col_index = config.availability_column
     col_letter = chr(65 + col_index)
     rules = []
@@ -521,16 +521,16 @@ def main():
     for dispensary in DISPENSARIES:
         start_time = time.monotonic()
         logging.info(f"Starting {dispensary.name}")
-        
+
         try:
             if products := dispensary.scrape_method(dispensary.url, dispensary.use_cloudscraper):
                 spreadsheet = client.open_by_key(dispensary.spreadsheet_id)
                 worksheet = _get_or_create_worksheet(spreadsheet, dispensary.sheet_name)
                 update_google_sheet(dispensary, worksheet, products)
-                
+
         except Exception as e:
             logging.error(f"Error processing {dispensary.name}: {str(e)}")
-        
+
         logging.info(f"Total {dispensary.name} time: {time.monotonic() - start_time:.2f}s")
 
 if __name__ == "__main__":

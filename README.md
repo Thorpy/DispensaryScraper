@@ -75,7 +75,7 @@ Replace `your_mamedica_sheet_id` and `your_montu_sheet_id` with the actual sheet
 
 ## Usage 🚀
 ```bash
-python dispensary_scraper.py
+python Bot.py
 ```
 
 Sample output:

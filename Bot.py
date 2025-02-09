@@ -346,18 +346,10 @@ def create_availability_rules(config: DispensaryConfig, worksheet, row_count: in
             })
     return rules
 
-def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> dict:
-    """Create alternating row colors for dispensaries without an availability column."""
+def create_zebra_stripes(config: DispensaryConfig, worksheet, row_count: int) -> dict:
+    """Create alternating row colors for dispensaries without availability column."""
     if config.availability_column is not None:
-        return None  # Handled by availability rules
-
-    # For Mamedica, use a more noticeable grey difference
-    if config.name == "Mamedica":
-        zebra_color = {'red': 0.9, 'green': 0.9, 'blue': 0.9}
-        text_color = {'red': 0.15, 'green': 0.15, 'blue': 0.15}
-    else:
-        zebra_color = ALTERNATING_ROW_COLOR
-        text_color = {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+        return None
 
     return {
         'addConditionalFormatRule': {
@@ -367,16 +359,13 @@ def _create_zebra_stripes(config, worksheet, row_count: int, col_count: int) -> 
                     'startRowIndex': 1,
                     'endRowIndex': row_count + 1,
                     'startColumnIndex': 0,
-                    'endColumnIndex': col_count
+                    'endColumnIndex': len(config.column_headers)
                 }],
                 'booleanRule': {
-                    'condition': {
-                        'type': 'CUSTOM_FORMULA',
-                        'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]
-                    },
+                    'condition': {'type': 'CUSTOM_FORMULA', 'values': [{"userEnteredValue": "=ISEVEN(ROW())"}]},
                     'format': {
-                        'backgroundColor': zebra_color,
-                        'textFormat': {'foregroundColor': text_color}
+                        'backgroundColor': config.even_stripe_color,
+                        'textFormat': {'foregroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
                     }
                 }
             }
@@ -497,7 +486,7 @@ def _create_availability_rules(config: DispensaryConfig, worksheet, row_count: i
 
     return rules
 
-def _create_optimized_borders(worksheet, row_count: int, col_count: int) -> dict:
+def create_borders(worksheet, row_count: int, col_count: int) -> dict:
     """Apply minimal border styling."""
     return {
         'updateBorders': {
@@ -529,15 +518,8 @@ def _create_frozen_header(worksheet) -> dict:
         }
     }
 
-def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) -> List[dict]:
+def create_text_alignment(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
     """Set column alignment and text wrapping."""
-    alignments = {
-        0: ('LEFT', 'WRAP'),
-        1: ('RIGHT', 'OVERFLOW_CELL'),
-        2: ('CENTER', 'OVERFLOW_CELL'),
-        3: ('CENTER', 'OVERFLOW_CELL'),
-        4: ('CENTER', 'OVERFLOW_CELL')
-    }
     return [{
         'repeatCell': {
             'range': {
@@ -549,15 +531,15 @@ def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) 
             },
             'cell': {
                 'userEnteredFormat': {
-                    'horizontalAlignment': alignment,
-                    'wrapStrategy': wrap_strategy
+                    'horizontalAlignment': alignment[0],
+                    'wrapStrategy': alignment[1]
                 }
             },
             'fields': 'userEnteredFormat(horizontalAlignment,wrapStrategy)'
         }
-    } for col, (alignment, wrap_strategy) in alignments.items()]
+    } for col, alignment in config.column_alignment.items()]
 
-def _create_timestamp_format(worksheet, row: int) -> dict:
+def create_timestamp_format(config: DispensaryConfig, worksheet, row: int) -> dict:
     """Format timestamp row."""
     return {
         'repeatCell': {
@@ -573,7 +555,7 @@ def _create_timestamp_format(worksheet, row: int) -> dict:
                     'textFormat': {
                         'italic': True,
                         'fontSize': 10,
-                        'foregroundColor': TIMESTAMP_COLOR
+                        'foregroundColor': config.timestamp_color
                     },
                     'backgroundColor': {'red': 0.95, 'green': 0.95, 'blue': 0.95}
                 }

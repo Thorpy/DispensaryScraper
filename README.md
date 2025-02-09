@@ -34,14 +34,43 @@ pip install -r requirements.txt
 ```
 
 ## Configuration 🔧
-1. Create Google Service Account credentials.
-2. Share your Google Sheet with the service account email.
-3. Add credentials to your environment (or configure via a `.env` file):
+
+### Step 1: Enable Google Sheets API and Create a Service Account
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a new project or select an existing one.
+3. Navigate to **APIs & Services > Library**.
+4. Search for **Google Sheets API** and click **Enable**.
+
+### Step 2: Create a Service Account and Download Credentials
+1. In the Cloud Console, go to **APIs & Services > Credentials**.
+2. Click **Create Credentials** and select **Service Account**.
+3. Fill in a name and description, then click **Create**.
+4. (Optional) Skip role assignments if not needed and click **Done**.
+5. Click on your newly created service account to view its details.
+6. Under the **Keys** section, click **Add Key > Create New Key**, choose **JSON**, and click **Create**.
+7. Save the downloaded JSON file as `credentials.json` in your project directory.
+
+### Step 3: Share Your Google Sheet with the Service Account
+1. Open your target Google Sheet.
+2. Click the **Share** button.
+3. Add the service account's email (found in `credentials.json` under `client_email`) with **Editor** permissions.
+
+### Step 4: Set Up Environment Variables
+You need to provide your configuration values to the application. You can create a `.env` file manually in your project directory or run the following one-liner command in your terminal (for Linux, macOS, or WSL):
+
+```bash
+echo "GOOGLE_CREDENTIALS_PATH=\"./credentials.json\"\nMAMEDICA_SHEET_ID=\"your_mamedica_sheet_id\"\nMONTU_SHEET_ID=\"your_montu_sheet_id\"" > .env
+```
+
+If you're using Windows, you can create a file named `.env` in your project directory and add the following content:
+
 ```bash
 GOOGLE_CREDENTIALS_PATH="./credentials.json"
-MAMEDICA_SHEET_ID="your_sheet_id"
-MONTU_SHEET_ID="your_sheet_id"
+MAMEDICA_SHEET_ID="your_mamedica_sheet_id"
+MONTU_SHEET_ID="your_montu_sheet_id"
 ```
+
+Replace `your_mamedica_sheet_id` and `your_montu_sheet_id` with the actual sheet IDs (the long string in the URL of your Google Sheet, e.g., `https://docs.google.com/spreadsheets/d/<sheet_id>/edit`).
 
 ## Usage 🚀
 ```bash

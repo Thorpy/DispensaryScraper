@@ -45,7 +45,7 @@ DISPENSARIES = [
         sheet_name="Mamedica List",
         scrape_method=lambda url, _: scrape_mamedica_products(url),
         column_headers=['Product', 'Price'],
-        column_widths={0: 380, 1: 100},
+        column_widths={0: 380, 1: 60},
         currency_columns=[1],
         use_cloudscraper=True
     ),

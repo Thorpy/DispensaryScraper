@@ -40,6 +40,20 @@ class AvailabilityStatus(Enum):
     AVAILABLE = 'Available'
     NOT_AVAILABLE = 'Not Available'
 
+# Global configuration constants
+REQUEST_TIMEOUT = 25
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+# Formatting constants
+WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}
+AVAILABLE_TEXT_COLOR = {'red': 0, 'green': 0.4, 'blue': 0}
+UNAVAILABLE_TEXT_COLOR = {'red': 0.6, 'green': 0, 'blue': 0}
+TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
+DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}
+LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}
+DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}
+LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}
+
 DISPENSARIES = [
     DispensaryConfig(
         name="Mamedica",
@@ -71,8 +85,6 @@ DISPENSARIES = [
 ]
 
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-REQUEST_TIMEOUT = 25
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 
 # ============================ CORE FUNCTIONALITY ==========================
 def load_google_credentials() -> Optional[Credentials]:
@@ -438,7 +450,7 @@ def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) 
 
 def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
     """Set column widths from configuration."""
-    return [{
+    return [ {
         'updateDimensionProperties': {
             'range': {
                 'sheetId': worksheet.id,
@@ -453,7 +465,7 @@ def _create_column_widths(config: DispensaryConfig, worksheet) -> List[dict]:
 
 def _create_currency_formats(config: DispensaryConfig, worksheet, row_count: int) -> List[dict]:
     """Apply currency formatting to specified columns."""
-    return [{
+    return [ {
         'repeatCell': {
             'range': {
                 'sheetId': worksheet.id,

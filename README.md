@@ -10,7 +10,7 @@ Automated product data scraper for medical dispensaries with real-time Google Sh
 🔗 [Mamedica Products](https://docs.google.com/spreadsheets/d/1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw/edit?usp=sharing)  
 🔗 [Montu Products](https://docs.google.com/spreadsheets/d/1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU/edit?usp=sharing)  
 🔗 [CB1 Shop](http://cb1.shop/) (3rd party sheet)  
-🔗 [Integro](https://docs.google.com/spreadsheets/d/15sxwI1IGcYTz-SC9bY0dO2ipEUGVW-_O/htmlview?pli=1#gid=404951805)(3rd party sheet)
+🔗 [Integro] (https://docs.google.com/spreadsheets/d/15sxwI1IGcYTz-SC9bY0dO2ipEUGVW-_O/htmlview?pli=1#gid=404951805)(3rd party sheet)
 
 ## Features ✨
 - Real-time Google Sheets updates

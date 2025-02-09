@@ -80,11 +80,12 @@ WHITE_TEXT = {'red': 1, 'green': 1, 'blue': 1}
 TIMESTAMP_COLOR = {'red': 0.5, 'green': 0.5, 'blue': 0.5}
 
 # ============================ CORE FUNCTIONALITY ==========================
-def load_google_credentials():
-    """Load Google Sheets API credentials using gspread's service account method."""
+def load_google_credentials() -> Optional[Credentials]:
+    """Load Google Sheets API credentials."""
     try:
-        return gspread.service_account(
-            filename=os.path.join(os.path.dirname(__file__), 'credentials.json')
+        return Credentials.from_service_account_file(
+            os.path.join(os.path.dirname(__file__), 'credentials.json'),
+            scopes=GOOGLE_SCOPES
         )
     except Exception as error:
         logging.error("Failed to load credentials: %s", error)
@@ -169,39 +170,37 @@ def scrape_montu_products(url: str, use_cloudscraper: bool = True) -> List[Tuple
         logging.error("Montu error: %s", error)
         return []
 
-def update_google_sheet(gc, config: DispensaryConfig, products: List[Tuple]):
-    """Optimized Google Sheets update with batch updates."""
+def update_google_sheet(config, worksheet, products):
+    """Update Google Sheet with data and formatting."""
     try:
-        spreadsheet = gc.open_by_key(config.spreadsheet_id)
-        worksheet = _get_or_create_worksheet(spreadsheet, config.sheet_name)
-
-        # Clear existing data and update
-        worksheet.batch_clear(["A:Z"])
+        # Prepare data with headers, products, and timestamp
         data = [config.column_headers] + [list(p) for p in products]
+        timestamp_row = len(data) + 2  # 2 empty rows after data
+        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+
+        # Clear existing data and update with new data
+        worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
 
-        # Formatting setup
-        col_count = len(config.column_headers)
-        row_count = len(products)
-
+        # Build formatting requests
         format_requests = [
-            *_create_header_format(worksheet, col_count),
+            _create_header_format(worksheet),
             *_create_column_widths(config, worksheet),
-            *_create_currency_formats(config, worksheet, row_count),
-            _create_row_color_rule(worksheet, row_count, col_count),
-            *_create_availability_rules(config, worksheet, row_count),
+            *_create_currency_formats(config, worksheet, len(products)),
+            _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
+            *_create_availability_rules(config, worksheet, len(products)),
+            _create_optimized_borders(worksheet, len(products), len(config.column_headers)),
             _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, len(data) + 2)
+            _create_timestamp_format(worksheet, timestamp_row),
+            *_create_text_alignment(worksheet, len(products), config)
         ]
 
-        # Update timestamp
-        worksheet.update(f'A{len(data)+2}', [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]])
-
-        # Apply formatting
-        if format_requests:
-            worksheet.spreadsheet.batch_update({'requests': [r for r in format_requests if r]})
+        # Execute batch update with valid requests
+        if valid_requests := [r for r in format_requests if r]:
+            worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
         logging.info(f"{config.name} sheet updated successfully")
+
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
 
@@ -514,9 +513,10 @@ def main():
         handlers=[logging.StreamHandler()]
     )
 
-    gc = load_google_credentials()
-    if not gc:
+    if not (credentials := load_google_credentials()):
         return
+
+    client = gspread.authorize(credentials)
 
     for dispensary in DISPENSARIES:
         start_time = time.monotonic()

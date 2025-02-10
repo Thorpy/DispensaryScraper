@@ -30,9 +30,9 @@ class DispensaryConfig:
     column_headers: List[str]
     column_widths: Dict[int, int]
     currency_columns: List[int]
-    header_color: Dict[str, float]  # New config field
-    even_stripe: Dict[str, float]   # New config field
-    odd_stripe: Dict[str, float]    # New config field
+    header_color: Dict[str, float]
+    even_stripe: Dict[str, float]
+    odd_stripe: Dict[str, float]
     availability_column: Optional[int] = None
     use_cloudscraper: bool = True
 
@@ -53,6 +53,9 @@ DARK_GREEN = {'red': 0.7, 'green': 0.9, 'blue': 0.7}
 LIGHT_GREEN = {'red': 0.85, 'green': 0.95, 'blue': 0.85}
 DARK_RED = {'red': 1, 'green': 0.7, 'blue': 0.7}
 LIGHT_RED = {'red': 1, 'green': 0.9, 'blue': 0.9}
+GREEN_COLOR = {'red': 0, 'green': 0.5, 'blue': 0}
+ORANGE_COLOR = {'red': 1, 'green': 0.55, 'blue': 0}
+GRAY_COLOR = {'red': 0.6, 'green': 0.6, 'blue': 0.6}
 
 DISPENSARIES = [
     DispensaryConfig(
@@ -60,9 +63,9 @@ DISPENSARIES = [
         url="https://mamedica.co.uk/repeat-prescription/",
         spreadsheet_id=os.getenv('MAMEDICA_SHEET_ID', '1VmxZ_1crsz4_h-RxEdtxAI6kdeniUcHxyttlR1T1rJw'),
         sheet_name="Mamedica List",
-        scrape_method=lambda url: scrape_mamedica_products(url),  # Removed unused parameter
+        scrape_method=lambda url: scrape_mamedica_products(url),
         column_headers=['Product', 'Price'],
-        column_widths={0: 380, 1: 60},
+        column_widths={0: 380, 1: 120},
         currency_columns=[1],
         header_color={'red': 0.12, 'green': 0.24, 'blue': 0.35},
         even_stripe={'red': 0.9, 'green': 0.9, 'blue': 0.9},
@@ -73,9 +76,9 @@ DISPENSARIES = [
         url="https://store.montu.uk/products.json",
         spreadsheet_id=os.getenv('MONTU_SHEET_ID', '1Ae_2QK40_VFgn1t4NAkPIvi0FwGu7mh67OK5hOEaQLU'),
         sheet_name="Montu List",
-        scrape_method=lambda url: scrape_montu_products(url),  # Removed unused parameter
+        scrape_method=lambda url: scrape_montu_products(url),
         column_headers=['Product', 'Price', 'THC %', 'CBD %', 'Availability'],
-        column_widths={0: 280, 1: 100, 2: 80, 3: 80, 4: 120},
+        column_widths={0: 280, 1: 120, 2: 80, 3: 80, 4: 120},
         currency_columns=[1],
         availability_column=4,
         header_color={'red': 0.12, 'green': 0.24, 'blue': 0.35},
@@ -115,7 +118,7 @@ def create_http_client(use_cloudscraper: bool = True) -> requests.Session:
 
 def scrape_mamedica_products(url: str) -> List[Tuple[str, float]]:
     """Scrape products from Mamedica website."""
-    client = create_http_client(True)  # Force cloudscraper for Mamedica
+    client = create_http_client(True)
     try:
         response = client.get(url, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
@@ -141,8 +144,8 @@ def scrape_mamedica_products(url: str) -> List[Tuple[str, float]]:
         return []
 
 def scrape_montu_products(url: str) -> List[Tuple[str, float, str, str, str]]:
-    """Scrape products from Montu/Australis website."""
-    client = create_http_client(True)  # Force cloudscraper for Montu
+    """Scrape products from Montu website."""
+    client = create_http_client(True)
     try:
         start_time = time.monotonic()
         response = client.get(f"{url}?limit=250", timeout=15)
@@ -180,16 +183,53 @@ def scrape_montu_products(url: str) -> List[Tuple[str, float, str, str, str]]:
 def update_google_sheet(config: DispensaryConfig, worksheet, products):
     """Update Google Sheet with data and formatting."""
     try:
-        # Prepare data with headers, products, and timestamp
-        data = [config.column_headers] + [list(p) for p in products]
+        # Get or create cache worksheet
+        cache_sheet_name = f"{config.sheet_name} Cache"
+        cache_worksheet = _get_or_create_cache_worksheet(worksheet.spreadsheet, cache_sheet_name)
+        cached_data = cache_worksheet.get_all_values()
+        cached_products = {}
+        for row in cached_data[1:]:
+            if len(row) >= 2:
+                try:
+                    cached_products[row[0]] = float(row[1])
+                except ValueError:
+                    logging.warning(f"Invalid price format in cache for {row[0]}: {row[1]}")
+
+        # Prepare data and track price changes
+        data = [config.column_headers]
+        formatted_cells = []
+        price_column_index = 1  # Price is always at index 1
+        
+        for i, product in enumerate(products):
+            product_name = product[0]
+            new_price = product[price_column_index]
+            old_price = cached_products.get(product_name)
+            product_data = list(product)
+            
+            if old_price is not None and old_price != new_price:
+                old_price_str = f"£{old_price:.2f}"
+                new_price_str = f"£{new_price:.2f}"
+                product_data[price_column_index] = f"{old_price_str} {new_price_str}"
+                formatted_cells.append({
+                    'row': i + 1,  # +1 to skip header row
+                    'col': price_column_index,
+                    'old_price_str': old_price_str,
+                    'new_price_str': new_price_str,
+                    'old_price': old_price,
+                    'new_price': new_price
+                })
+            
+            data.append(product_data)
+        
+        # Add empty rows and timestamp
         timestamp_row = len(data) + 2
         data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
 
-        # Clear existing data and update with new data
+        # Update main worksheet
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
 
-        # Build formatting requests using config values
+        # Build formatting requests
         format_requests = [
             _create_header_format(config, worksheet),
             *_create_column_widths(config, worksheet),
@@ -202,6 +242,54 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
             *_create_text_alignment(worksheet, len(products), config)
         ]
 
+        # Add price change formatting
+        for cell in formatted_cells:
+            old_part = cell['old_price_str'] + ' '
+            old_len = len(old_part)
+            is_price_drop = cell['new_price'] < cell['old_price']
+            color = GREEN_COLOR if is_price_drop else ORANGE_COLOR
+            
+            format_requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': cell['row'],
+                        'endRowIndex': cell['row'] + 1,
+                        'startColumnIndex': cell['col'],
+                        'endColumnIndex': cell['col'] + 1
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'textFormatRuns': [
+                                {
+                                    'startIndex': 0,
+                                    'format': {
+                                        'strikethrough': True,
+                                        'foregroundColor': GRAY_COLOR
+                                    }
+                                },
+                                {
+                                    'startIndex': old_len,
+                                    'format': {
+                                        'foregroundColor': color,
+                                        'bold': True
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    'fields': 'userEnteredFormat.textFormatRuns'
+                }
+            })
+
+        # Update cache worksheet
+        cache_data = [['Product', 'Price']]
+        for product in products:
+            cache_data.append([product[0], str(product[1])])
+        cache_worksheet.batch_clear(["A:Z"])
+        cache_worksheet.update(cache_data, 'A1')
+
+        # Apply all formatting
         if valid_requests := [r for r in format_requests if r]:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
@@ -212,11 +300,18 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
 
 # ============================ HELPER FUNCTIONS ============================
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
-    """Manage worksheet creation/retrieval."""
     try:
         return spreadsheet.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
         return spreadsheet.add_worksheet(sheet_name, 100, 20)
+
+def _get_or_create_cache_worksheet(spreadsheet, cache_sheet_name: str):
+    try:
+        return spreadsheet.worksheet(cache_sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        worksheet = spreadsheet.add_worksheet(cache_sheet_name, 100, 2)
+        worksheet.update([['Product', 'Price']], 'A1')
+        return worksheet
 
 def _create_header_format(config: DispensaryConfig, worksheet) -> dict:
     """Create header row formatting using config values."""

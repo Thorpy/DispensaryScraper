@@ -197,7 +197,6 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
 
         # Prepare data and track price changes
         data = [config.column_headers]
-        formatted_cells = []
         price_column_index = 1  # Price is always at index 1
         
         for i, product in enumerate(products):
@@ -207,21 +206,14 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
             product_data = list(product)
             
             if old_price is not None and old_price != new_price:
+                # Update the price cell text to indicate the change.
                 old_price_str = f"£{old_price:.2f}"
                 new_price_str = f"£{new_price:.2f}"
-                product_data[price_column_index] = f"{old_price_str} {new_price_str}"
-                formatted_cells.append({
-                    'row': i + 1,  # +1 to skip header row
-                    'col': price_column_index,
-                    'old_price_str': old_price_str,
-                    'new_price_str': new_price_str,
-                    'old_price': old_price,
-                    'new_price': new_price
-                })
-            
+                product_data[price_column_index] = f"was: {old_price_str} now: {new_price_str}"
+            # Otherwise, leave the price as-is.
             data.append(product_data)
         
-        # Add empty rows and timestamp
+        # Add empty rows and a timestamp
         timestamp_row = len(data) + 2
         data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
         
@@ -229,7 +221,7 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
         
-        # Build formatting requests
+        # Build formatting requests for non-price-change elements
         format_requests = [
             _create_header_format(config, worksheet),
             *_create_column_widths(config, worksheet),
@@ -242,43 +234,16 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
             *_create_text_alignment(worksheet, len(products), config)
         ]
         
-        # Add price change formatting
-        # Note: Instead of trying to use per-character formatting (which required a list under textFormatRuns),
-        # we apply a uniform format to the entire cell using "textFormat".
-        for cell in formatted_cells:
-            is_price_drop = cell['new_price'] < cell['old_price']
-            color = GREEN_COLOR if is_price_drop else ORANGE_COLOR
-            format_requests.append({
-                'repeatCell': {
-                    'range': {
-                        'sheetId': worksheet.id,
-                        'startRowIndex': cell['row'],
-                        'endRowIndex': cell['row'] + 1,
-                        'startColumnIndex': cell['col'],
-                        'endColumnIndex': cell['col'] + 1
-                    },
-                    'cell': {
-                        'userEnteredFormat': {
-                            'textFormat': {
-                                'foregroundColor': color,
-                                'bold': True
-                            }
-                        }
-                    },
-                    'fields': 'userEnteredFormat.textFormat'
-                }
-            })
+        # Apply all formatting requests
+        if valid_requests := [r for r in format_requests if r]:
+            worksheet.spreadsheet.batch_update({'requests': valid_requests})
         
-        # Update cache worksheet
+        # Update the cache worksheet with current prices
         cache_data = [['Product', 'Price']]
         for product in products:
             cache_data.append([product[0], str(product[1])])
         cache_worksheet.batch_clear(["A:Z"])
         cache_worksheet.update(cache_data, 'A1')
-        
-        # Apply all formatting
-        if valid_requests := [r for r in format_requests if r]:
-            worksheet.spreadsheet.batch_update({'requests': valid_requests})
         
         logging.info(f"{config.name} sheet updated successfully")
     

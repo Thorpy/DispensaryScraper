@@ -180,31 +180,6 @@ def scrape_montu_products(url: str) -> List[Tuple[str, float, str, str, str]]:
         logging.error("Montu error: %s", error)
         return []
 
-
-            
-            data.append(product_data)
-        
-        # Add empty rows and timestamp
-        timestamp_row = len(data) + 2
-        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-
-        # Update main worksheet
-        worksheet.batch_clear(["A:Z"])
-        worksheet.update(data, 'A1')
-
-        # Build formatting requests
-        format_requests = [
-            _create_header_format(config, worksheet),
-            *_create_column_widths(config, worksheet),
-            *_create_currency_formats(config, worksheet, len(products)),
-            _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
-            *_create_availability_rules(config, worksheet, len(products)),
-            _create_optimized_borders(worksheet, len(products), len(config.column_headers)),
-            _create_frozen_header(worksheet),
-            _create_timestamp_format(worksheet, timestamp_row),
-            *_create_text_alignment(worksheet, len(products), config)
-        ]
-
 def update_google_sheet(config: DispensaryConfig, worksheet, products):
     """Update Google Sheet with data and formatting."""
     try:

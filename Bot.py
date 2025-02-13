@@ -260,7 +260,7 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
                     },
                     'cell': {
                         'userEnteredFormat': {
-                            'textFormatRuns': [
+                            'textFormat': [
                                 {
                                     'startIndex': 0,
                                     'format': {
@@ -278,7 +278,7 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
                             ]
                         }
                     },
-                    'fields': 'userEnteredFormat.textFormatRuns'
+                    'fields': 'userEnteredFormat.textFormat'
                 }
             })
 

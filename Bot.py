@@ -180,6 +180,31 @@ def scrape_montu_products(url: str) -> List[Tuple[str, float, str, str, str]]:
         logging.error("Montu error: %s", error)
         return []
 
+
+            
+            data.append(product_data)
+        
+        # Add empty rows and timestamp
+        timestamp_row = len(data) + 2
+        data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
+
+        # Update main worksheet
+        worksheet.batch_clear(["A:Z"])
+        worksheet.update(data, 'A1')
+
+        # Build formatting requests
+        format_requests = [
+            _create_header_format(config, worksheet),
+            *_create_column_widths(config, worksheet),
+            *_create_currency_formats(config, worksheet, len(products)),
+            _create_zebra_stripes(config, worksheet, len(products), len(config.column_headers)),
+            *_create_availability_rules(config, worksheet, len(products)),
+            _create_optimized_borders(worksheet, len(products), len(config.column_headers)),
+            _create_frozen_header(worksheet),
+            _create_timestamp_format(worksheet, timestamp_row),
+            *_create_text_alignment(worksheet, len(products), config)
+        ]
+
 def update_google_sheet(config: DispensaryConfig, worksheet, products):
     """Update Google Sheet with data and formatting."""
     try:
@@ -224,11 +249,11 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         # Add empty rows and timestamp
         timestamp_row = len(data) + 2
         data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-
+        
         # Update main worksheet
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
-
+        
         # Build formatting requests
         format_requests = [
             _create_header_format(config, worksheet),
@@ -241,14 +266,13 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
             _create_timestamp_format(worksheet, timestamp_row),
             *_create_text_alignment(worksheet, len(products), config)
         ]
-
+        
         # Add price change formatting
+        # Note: Instead of trying to use per-character formatting (which required a list under textFormatRuns),
+        # we apply a uniform format to the entire cell using "textFormat".
         for cell in formatted_cells:
-            old_part = cell['old_price_str'] + ' '
-            old_len = len(old_part)
             is_price_drop = cell['new_price'] < cell['old_price']
             color = GREEN_COLOR if is_price_drop else ORANGE_COLOR
-            
             format_requests.append({
                 'repeatCell': {
                     'range': {
@@ -260,44 +284,32 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
                     },
                     'cell': {
                         'userEnteredFormat': {
-                            'textFormat': [
-                                {
-                                    'startIndex': 0,
-                                    'format': {
-                                        'strikethrough': True,
-                                        'foregroundColor': GRAY_COLOR
-                                    }
-                                },
-                                {
-                                    'startIndex': old_len,
-                                    'format': {
-                                        'foregroundColor': color,
-                                        'bold': True
-                                    }
-                                }
-                            ]
+                            'textFormat': {
+                                'foregroundColor': color,
+                                'bold': True
+                            }
                         }
                     },
                     'fields': 'userEnteredFormat.textFormat'
                 }
             })
-
+        
         # Update cache worksheet
         cache_data = [['Product', 'Price']]
         for product in products:
             cache_data.append([product[0], str(product[1])])
         cache_worksheet.batch_clear(["A:Z"])
         cache_worksheet.update(cache_data, 'A1')
-
+        
         # Apply all formatting
         if valid_requests := [r for r in format_requests if r]:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
-
+        
         logging.info(f"{config.name} sheet updated successfully")
-
+    
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
-
+        
 # ============================ HELPER FUNCTIONS ============================
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     try:

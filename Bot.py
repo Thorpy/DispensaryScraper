@@ -471,7 +471,7 @@ def _create_text_alignment(worksheet, row_count: int, config: DispensaryConfig) 
     """Set column alignment and text wrapping."""
     alignments = {
         0: ('LEFT', 'WRAP'),
-        1: ('RIGHT', 'OVERFLOW_CELL'),
+        1: ('RIGHT', 'WRAP'),
         2: ('CENTER', 'OVERFLOW_CELL'),
         3: ('CENTER', 'OVERFLOW_CELL'),
         4: ('CENTER', 'OVERFLOW_CELL')

@@ -188,6 +188,7 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         cache_worksheet = _get_or_create_cache_worksheet(worksheet.spreadsheet, cache_sheet_name)
         cached_data = cache_worksheet.get_all_values()
         cached_products = {}
+        
         for row in cached_data[1:]:
             if len(row) >= 2:
                 try:
@@ -198,30 +199,29 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         # Prepare data and track price changes
         data = [config.column_headers]
         price_column_index = 1  # Price is always at index 1
-        
-        for i, product in enumerate(products):
+
+        for product in products:
             product_name = product[0]
             new_price = product[price_column_index]
             old_price = cached_products.get(product_name)
             product_data = list(product)
-            
+
             if old_price is not None and old_price != new_price:
-                # Update the price cell text to indicate the change.
                 old_price_str = f"£{old_price:.2f}"
                 new_price_str = f"£{new_price:.2f}"
                 product_data[price_column_index] = f"was: {old_price_str} now: {new_price_str}"
-            # Otherwise, leave the price as-is.
+            
             data.append(product_data)
-        
+
         # Add empty rows and a timestamp
         timestamp_row = len(data) + 2
         data += [[]] * 2 + [[datetime.now().strftime("Updated: %H:%M %d/%m/%Y")]]
-        
+
         # Update main worksheet
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
-        
-        # Build formatting requests for non-price-change elements
+
+        # Build formatting requests
         format_requests = [
             _create_header_format(config, worksheet),
             *_create_column_widths(config, worksheet),
@@ -233,32 +233,31 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
             _create_timestamp_format(worksheet, timestamp_row),
             *_create_text_alignment(worksheet, len(products), config)
         ]
-        
-        # Apply all formatting requests
-        if valid_requests := [r for r in format_requests if r]:
+
+        # Apply formatting requests
+        valid_requests = [r for r in format_requests if r]
+        if valid_requests:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
-        
-        # Update the cache worksheet with current prices
+
         # Update the cache worksheet with current prices, preserving the highest price
         cache_data = [['Product', 'Price']]
         for product in products:
             product_name = product[0]
             new_price = product[1]  # Assuming price is at index 1
             cached_price = cached_products.get(product_name)
-    
-         if cached_price is not None:
-             # Use the maximum of new_price and cached_price to preserve highest price
-             cache_price = max(new_price, cached_price)
-         else:
-             cache_price = new_price  # New product, add to cache
-    
-         cache_data.append([product_name, str(cache_price)])
 
-         cache_worksheet.batch_clear(["A:Z"])
-         cache_worksheet.update(cache_data, 'A1')
-        
+            if cached_price is not None:
+                cache_price = max(new_price, cached_price)  # Preserve highest price
+            else:
+                cache_price = new_price  # New product, add to cache
+
+            cache_data.append([product_name, str(cache_price)])
+
+        cache_worksheet.batch_clear(["A:Z"])
+        cache_worksheet.update(cache_data, 'A1')
+
         logging.info(f"{config.name} sheet updated successfully")
-    
+
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
         

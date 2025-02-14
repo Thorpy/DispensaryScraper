@@ -239,11 +239,23 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
         
         # Update the cache worksheet with current prices
+        # Update the cache worksheet with current prices, preserving the highest price
         cache_data = [['Product', 'Price']]
         for product in products:
-            cache_data.append([product[0], str(product[1])])
-        cache_worksheet.batch_clear(["A:Z"])
-        cache_worksheet.update(cache_data, 'A1')
+            product_name = product[0]
+            new_price = product[1]  # Assuming price is at index 1
+            cached_price = cached_products.get(product_name)
+    
+         if cached_price is not None:
+             # Use the maximum of new_price and cached_price to preserve highest price
+             cache_price = max(new_price, cached_price)
+         else:
+             cache_price = new_price  # New product, add to cache
+    
+         cache_data.append([product_name, str(cache_price)])
+
+         cache_worksheet.batch_clear(["A:Z"])
+         cache_worksheet.update(cache_data, 'A1')
         
         logging.info(f"{config.name} sheet updated successfully")
     

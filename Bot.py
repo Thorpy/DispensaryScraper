@@ -186,32 +186,62 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         # Get or create cache worksheet
         cache_sheet_name = f"{config.sheet_name} Cache"
         cache_worksheet = _get_or_create_cache_worksheet(worksheet.spreadsheet, cache_sheet_name)
-        cached_data = cache_worksheet.get_all_values()
-        cached_products = {}
         
-        for row in cached_data[1:]:
+        # Read existing cache data
+        cached_data = cache_worksheet.get_all_values()
+        existing_cache = {}
+        for row in cached_data[1:]:  # Skip header row
             if len(row) >= 2:
                 try:
-                    cached_products[row[0]] = float(row[1])
+                    product_name = row[0].strip().lower()  # Normalize names
+                    existing_cache[product_name] = float(row[1])
                 except ValueError:
                     logging.warning(f"Invalid price format in cache for {row[0]}: {row[1]}")
 
-        # Prepare data and track price changes
+        # Merge new data with existing cache
+        new_cache = {}
+        for product in products:
+            try:
+                product_name = product[0].strip().lower()  # Normalize names
+                new_price = product[1]  # Price is at index 1 for all configs
+                
+                # Preserve highest historical price
+                if product_name in existing_cache:
+                    new_cache[product_name] = max(new_price, existing_cache[product_name])
+                else:
+                    new_cache[product_name] = new_price
+            except IndexError:
+                logging.error(f"Invalid product format: {product}")
+                continue
+
+        # Maintain any products that disappeared from current scrape but were previously cached
+        merged_cache = {**existing_cache, **new_cache}  # existing_cache acts as fallback
+
+        # Prepare data and track price changes for main sheet
         data = [config.column_headers]
         price_column_index = 1  # Price is always at index 1
+        price_changes = []
 
         for product in products:
-            product_name = product[0]
-            new_price = product[price_column_index]
-            old_price = cached_products.get(product_name)
-            product_data = list(product)
-
-            if old_price is not None and old_price != new_price:
-                old_price_str = f"£{old_price:.2f}"
-                new_price_str = f"£{new_price:.2f}"
-                product_data[price_column_index] = f"was: {old_price_str} now: {new_price_str}"
-            
-            data.append(product_data)
+            try:
+                product_name = product[0].strip().lower()
+                new_price = product[price_column_index]
+                original_name = product[0]  # Preserve original formatting
+                
+                # Get historical price from merged cache
+                historical_price = merged_cache.get(product_name, new_price)
+                
+                # Format price comparison if price dropped
+                product_data = list(product)
+                if historical_price > new_price:
+                    product_data[price_column_index] = (
+                        f"was: £{historical_price:.2f} now: £{new_price:.2f}"
+                    )
+                    price_changes.append((original_name, historical_price, new_price))
+                
+                data.append(product_data)
+            except IndexError:
+                continue
 
         # Add empty rows and a timestamp
         timestamp_row = len(data) + 2
@@ -220,6 +250,20 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         # Update main worksheet
         worksheet.batch_clear(["A:Z"])
         worksheet.update(data, 'A1')
+
+        # Update cache with merged data (sorted alphabetically)
+        cache_data = [['Product', 'Price']]
+        for product_name, price in sorted(merged_cache.items(), key=lambda x: x[0]):
+            cache_data.append([product_name.title(), str(price)])  # Store with original casing
+
+        cache_worksheet.batch_clear(["A:Z"])
+        cache_worksheet.update(cache_data, 'A1')
+
+        # Log price changes
+        if price_changes:
+            logging.info(f"Price changes detected ({len(price_changes)}):")
+            for change in price_changes:
+                logging.info(f"- {change[0]}: £{change[1]} → £{change[2]}")
 
         # Build formatting requests
         format_requests = [
@@ -239,28 +283,11 @@ def update_google_sheet(config: DispensaryConfig, worksheet, products):
         if valid_requests:
             worksheet.spreadsheet.batch_update({'requests': valid_requests})
 
-        # Update the cache worksheet with current prices, preserving the highest price
-        cache_data = [['Product', 'Price']]
-        for product in products:
-            product_name = product[0]
-            new_price = product[1]  # Assuming price is at index 1
-            cached_price = cached_products.get(product_name)
-
-            if cached_price is not None:
-                cache_price = max(new_price, cached_price)  # Preserve highest price
-            else:
-                cache_price = new_price  # New product, add to cache
-
-            cache_data.append([product_name, str(cache_price)])
-
-        cache_worksheet.batch_clear(["A:Z"])
-        cache_worksheet.update(cache_data, 'A1')
-
-        logging.info(f"{config.name} sheet updated successfully")
+        logging.info(f"{config.name} sheet updated successfully with {len(merged_cache)} cached items")
 
     except Exception as error:
         logging.error("Sheet update failed: %s", error)
-        
+
 # ============================ HELPER FUNCTIONS ============================
 def _get_or_create_worksheet(spreadsheet, sheet_name: str):
     try:
